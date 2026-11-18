@@ -434,9 +434,13 @@ const TokenManagerInner = (
         case "note_r": return t("ui.token.permNoteR");
         case "note_w":
         case "note_rw": return t("ui.token.permNoteRW");
+        case "note_purge": return t("ui.token.permNotePurge");
         case "file_r": return t("ui.token.permFileR");
         case "file_w":
         case "file_rw": return t("ui.token.permFileRW");
+        case "file_purge": return t("ui.token.permFilePurge");
+        case "vault_r": return t("ui.token.permVaultR");
+        case "vault_w": return t("ui.token.permVaultW");
         case "config_r": return t("ui.token.permConfigR");
         case "config_w":
         case "config_rw": return t("ui.token.permConfigRW");
@@ -495,7 +499,7 @@ const TokenManagerInner = (
 
 
         <Dialog open={isCreateOpen} onOpenChange={(open) => !open && closeCreateDialog()}>
-          <DialogContent className="sm:max-w-[600px] rounded-2xl">
+          <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto rounded-2xl">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Key className="h-5 w-5 text-primary" />
@@ -600,7 +604,7 @@ const TokenManagerInner = (
                       </Tooltip>
                     </span>
                   </Label>
-                  <div className="grid grid-cols-3 gap-y-3 gap-x-4 p-3 rounded-xl bg-muted/50 border border-border">
+                  <div className="grid grid-cols-2 gap-y-3 gap-x-4 p-3 rounded-xl bg-muted/50 border border-border">
                     {/* Notes Column */}
                     <div className="space-y-2">
                       <div className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-wider mb-1 px-1 border-b border-border/30 pb-1">
@@ -609,6 +613,7 @@ const TokenManagerInner = (
                       {[
                         { id: "note_r", label: t("ui.token.funcNoteR") },
                         { id: "note_rw", label: t("ui.token.funcNoteRW") },
+                        { id: "note_purge", label: t("ui.token.funcNotePurge") },
                       ].map((opt) => (
                         <div key={opt.id} className="flex items-center space-x-2">
                           <Checkbox
@@ -630,6 +635,28 @@ const TokenManagerInner = (
                       {[
                         { id: "file_r", label: t("ui.token.funcFileR") },
                         { id: "file_rw", label: t("ui.token.funcFileRW") },
+                        { id: "file_purge", label: t("ui.token.funcFilePurge") },
+                      ].map((opt) => (
+                        <div key={opt.id} className="flex items-center space-x-2">
+                          <Checkbox
+                            id={`f-${opt.id}`}
+                            checked={newFuncDims.includes(opt.id)}
+                            onCheckedChange={() => toggleFuncDim(opt.id)}
+                            className="h-3.5 w-3.5"
+                          />
+                          <Label htmlFor={`f-${opt.id}`} className="cursor-pointer text-[11px] truncate" title={opt.label}>{opt.label.includes(' - ') ? opt.label.split(' - ')[1] : opt.label}</Label>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Vault Column */}
+                    <div className="space-y-2">
+                      <div className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-wider mb-1 px-1 border-b border-border/30 pb-1">
+                        {t("ui.vault.vault")}
+                      </div>
+                      {[
+                        { id: "vault_r", label: t("ui.token.funcVaultR") },
+                        { id: "vault_w", label: t("ui.token.funcVaultW") },
                       ].map((opt) => (
                         <div key={opt.id} className="flex items-center space-x-2">
                           <Checkbox
@@ -664,7 +691,7 @@ const TokenManagerInner = (
                       ))}
                     </div>
 
-                    <div className="col-span-3 border-t border-border/50 pt-2 mt-1">
+                    <div className="col-span-2 border-t border-border/50 pt-2 mt-1">
                       <div className="flex items-center space-x-2">
                         <Checkbox
                           id="f-all"
