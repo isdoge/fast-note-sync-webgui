@@ -225,6 +225,7 @@ describe('TableOfContents', () => {
 
     const previewContainer = document.createElement('div');
     previewContainer.className = 'markdown-preview';
+    previewContainer.style.overflowY = 'auto';
     previewContainer.scrollTop = 40;
     previewContainer.getBoundingClientRect = vi.fn(() => ({
       top: 100,
@@ -291,6 +292,7 @@ describe('TableOfContents', () => {
 
     const previewContainer = document.createElement('div');
     previewContainer.className = 'markdown-preview';
+    previewContainer.style.overflowY = 'auto';
     previewContainer.scrollTop = 0;
     previewContainer.getBoundingClientRect = vi.fn(() => ({
       top: 100,
@@ -425,5 +427,145 @@ describe('TableOfContents', () => {
     expect(screen.getByRole('link', { name: 'First Heading' })).toBeInTheDocument();
     // 确认没有浮动按钮
     expect(screen.queryByRole('button', { name: /大纲/i })).not.toBeInTheDocument();
+  });
+
+  it('点击最后一个标题后，程序滚动结束后高亮应稳定停留在最后一个标题而不回跳 (#477)', () => {
+    vi.useFakeTimers();
+
+    const previewContainer = document.createElement('div');
+    previewContainer.className = 'markdown-preview';
+    previewContainer.style.overflowY = 'auto';
+    Object.defineProperty(previewContainer, 'clientHeight', { value: 400, configurable: true });
+    Object.defineProperty(previewContainer, 'scrollHeight', { value: 1200, configurable: true });
+    Object.defineProperty(previewContainer, 'scrollTop', { value: 0, writable: true, configurable: true });
+    Object.defineProperty(previewContainer, 'scrollTo', {
+      value: vi.fn(({ top }: { top: number }) => {
+        previewContainer.scrollTop = top;
+      }),
+      configurable: true,
+    });
+    previewContainer.getBoundingClientRect = vi.fn(() => ({
+      top: 0,
+      bottom: 400,
+      left: 0,
+      right: 0,
+      width: 0,
+      height: 400,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    }));
+
+    const h1 = document.createElement('h1');
+    h1.id = 'heading-1';
+    h1.textContent = 'First Heading';
+    h1.getBoundingClientRect = vi.fn(() => ({
+      top: 20, bottom: 50, left: 0, right: 0, width: 0, height: 30, x: 0, y: 20, toJSON: () => ({}),
+    }));
+
+    const h2 = document.createElement('h2');
+    h2.id = 'heading-2';
+    h2.textContent = 'Last Heading';
+    h2.getBoundingClientRect = vi.fn(() => ({
+      top: 900, bottom: 930, left: 0, right: 0, width: 0, height: 30, x: 0, y: 900, toJSON: () => ({}),
+    }));
+
+    previewContainer.appendChild(h1);
+    previewContainer.appendChild(h2);
+    document.body.appendChild(previewContainer);
+
+    const TestHelper = () => {
+      const { registerHeading } = useToc();
+      React.useEffect(() => {
+        registerHeading({ id: 'heading-1', level: 1, text: 'First Heading', element: h1 });
+        registerHeading({ id: 'heading-2', level: 2, text: 'Last Heading', element: h2 });
+      }, [registerHeading]);
+      return null;
+    };
+
+    render(
+      <TocProvider>
+        <TestHelper />
+        <TableOfContents isInline={true} />
+      </TocProvider>
+    );
+
+    // 初始在顶部：h1 可见并高亮
+    act(() => {
+      triggerIntersection([{ target: h1, isIntersecting: true }]);
+    });
+    expect(screen.getByRole('link', { name: 'First Heading' })).toHaveAttribute('aria-current', 'location');
+
+    // 点击最后一个标题
+    fireEvent.click(screen.getByRole('link', { name: 'Last Heading' }));
+    expect(screen.getByRole('link', { name: 'Last Heading' })).toHaveAttribute('aria-current', 'location');
+
+    // 程序化滚动过程中 h1 离开顶部观察区、且容器滚到底部
+    previewContainer.scrollTop = 800;
+    act(() => {
+      triggerIntersection([{ target: h1, isIntersecting: false }]);
+      vi.advanceTimersByTime(1300);
+    });
+
+    // 定时器结束后再触发一次滚动，也不应回跳到 First Heading
+    act(() => {
+      fireEvent.scroll(previewContainer);
+    });
+    expect(screen.getByRole('link', { name: 'Last Heading' })).toHaveAttribute('aria-current', 'location');
+    expect(screen.getByRole('link', { name: 'First Heading' })).not.toHaveAttribute('aria-current');
+
+    vi.useRealTimers();
+  });
+
+  it('手动滚到页面底部时应高亮最后一个标题，向上滚回时恢复跟随 (#477)', () => {
+    const previewContainer = document.createElement('div');
+    previewContainer.className = 'markdown-preview';
+    previewContainer.style.overflowY = 'auto';
+    Object.defineProperty(previewContainer, 'clientHeight', { value: 400, configurable: true });
+    Object.defineProperty(previewContainer, 'scrollHeight', { value: 1200, configurable: true });
+    Object.defineProperty(previewContainer, 'scrollTop', { value: 0, writable: true, configurable: true });
+
+    const h1 = document.createElement('h1');
+    h1.id = 'heading-1';
+    const h2 = document.createElement('h2');
+    h2.id = 'heading-2';
+    previewContainer.appendChild(h1);
+    previewContainer.appendChild(h2);
+    document.body.appendChild(previewContainer);
+
+    const TestHelper = () => {
+      const { registerHeading } = useToc();
+      React.useEffect(() => {
+        registerHeading({ id: 'heading-1', level: 1, text: 'First Heading', element: h1 });
+        registerHeading({ id: 'heading-2', level: 2, text: 'Last Heading', element: h2 });
+      }, [registerHeading]);
+      return null;
+    };
+
+    render(
+      <TocProvider>
+        <TestHelper />
+        <TableOfContents isInline={true} />
+      </TocProvider>
+    );
+
+    act(() => {
+      triggerIntersection([{ target: h1, isIntersecting: true }]);
+    });
+    expect(screen.getByRole('link', { name: 'First Heading' })).toHaveAttribute('aria-current', 'location');
+
+    // 手动滑到底部（即使 h2 在底部 60% 没进入顶部 40% 观察线）
+    previewContainer.scrollTop = 800;
+    act(() => {
+      fireEvent.scroll(previewContainer);
+    });
+    expect(screen.getByRole('link', { name: 'Last Heading' })).toHaveAttribute('aria-current', 'location');
+
+    // 向上滚回顶部时应恢复高亮 First Heading
+    previewContainer.scrollTop = 100;
+    act(() => {
+      fireEvent.scroll(previewContainer);
+    });
+    expect(screen.getByRole('link', { name: 'First Heading' })).toHaveAttribute('aria-current', 'location');
   });
 });

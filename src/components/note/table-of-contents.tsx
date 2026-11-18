@@ -5,6 +5,23 @@ import { Button } from '@/components/ui/button';
 import { useTranslation } from 'react-i18next';
 import { List, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { isScrollAtBottom, resolveActiveHeadingId } from './toc-active';
+
+function isContainerAtBottom(rootEl: Element | null): boolean {
+  if (rootEl) {
+    return isScrollAtBottom({
+      scrollTop: rootEl.scrollTop,
+      clientHeight: rootEl.clientHeight,
+      scrollHeight: rootEl.scrollHeight,
+    });
+  }
+
+  const docEl = document.documentElement;
+  const scrollTop = window.scrollY || docEl?.scrollTop || document.body?.scrollTop || 0;
+  const clientHeight = window.innerHeight || docEl?.clientHeight || 0;
+  const scrollHeight = Math.max(docEl?.scrollHeight || 0, document.body?.scrollHeight || 0);
+  return isScrollAtBottom({ scrollTop, clientHeight, scrollHeight });
+}
 
 
 /**
@@ -51,8 +68,26 @@ export const TableOfContents: React.FC<TableOfContentsProps> = ({
   const observerRef = useRef<IntersectionObserver | null>(null);
   const isProgrammaticScrollRef = useRef(false);
   const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollSettleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const listContainerRef = useRef<HTMLDivElement>(null);
   const [rootEl, setRootEl] = useState<Element | null>(null);
+
+  const clearProgrammaticTimers = useCallback(() => {
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
+      scrollTimeoutRef.current = null;
+    }
+    if (scrollSettleTimeoutRef.current) {
+      clearTimeout(scrollSettleTimeoutRef.current);
+      scrollSettleTimeoutRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearProgrammaticTimers();
+    };
+  }, [clearProgrammaticTimers]);
 
   // 动态查找预览滚动容器，应对 Suspense 懒加载/延迟挂载的问题
   // Dynamically find the preview scroll container to handle Suspense lazy loading/delayed mounting
@@ -130,10 +165,12 @@ export const TableOfContents: React.FC<TableOfContentsProps> = ({
         // Calculate container internal relative scrollTop to center active item without shifting global main scrollbar
         const targetScrollTop = elemTop - containerHeight / 2 + elemHeight / 2;
 
-        container.scrollTo({
-          top: targetScrollTop,
-          behavior: 'smooth'
-        });
+        if (typeof container.scrollTo === 'function') {
+          container.scrollTo({
+            top: targetScrollTop,
+            behavior: 'smooth'
+          });
+        }
       }
     } catch (e) {
       console.warn('Failed to scroll active toc item into view:', e);
@@ -158,8 +195,8 @@ export const TableOfContents: React.FC<TableOfContentsProps> = ({
     }
   }, [headings]);
 
-  // 设置 IntersectionObserver 监听标题可见性
-  // Set up IntersectionObserver to watch heading visibility
+  // 设置 IntersectionObserver 与滚动监听，协同维护标题高亮
+  // Set up IntersectionObserver and scroll listener to track heading visibility and bottom state
   useEffect(() => {
     // 清理旧的 observer
     // Clean up the old observer
@@ -175,14 +212,23 @@ export const TableOfContents: React.FC<TableOfContentsProps> = ({
     // Record currently visible headings
     const visibleHeadings = new Set<string>();
 
+    const updateActiveHeading = () => {
+      const nextId = resolveActiveHeadingId({
+        headings: filteredHeadings,
+        visibleIds: visibleHeadings,
+        isAtBottom: isContainerAtBottom(rootEl),
+      });
+      if (nextId) {
+        setActiveId(nextId);
+      }
+    };
+
     // 创建新的 observer
     // Create a new observer
     observerRef.current = new IntersectionObserver(
       (entries) => {
-        if (isProgrammaticScrollRef.current) return;
-
-        // 更新可见状态
-        // Update visibility status
+        // 程序化滚动期间也要同步更新 visibleHeadings，避免残留点击前的旧标题
+        // Always update visibility status even during programmatic scroll to avoid stale headings
         entries.forEach(entry => {
           if (entry.isIntersecting) {
             visibleHeadings.add(entry.target.id);
@@ -191,14 +237,9 @@ export const TableOfContents: React.FC<TableOfContentsProps> = ({
           }
         });
 
-        // 如果有可见的标题，选中在文档中最靠前的一个
-        // If there are visible headings, select the first one in the document
-        if (visibleHeadings.size > 0) {
-          const firstVisible = filteredHeadings.find(h => visibleHeadings.has(h.id));
-          if (firstVisible) {
-            setActiveId(firstVisible.id);
-          }
-        }
+        if (isProgrammaticScrollRef.current) return;
+
+        updateActiveHeading();
       },
       {
         root: rootEl,
@@ -218,12 +259,51 @@ export const TableOfContents: React.FC<TableOfContentsProps> = ({
       }
     });
 
+    const scrollTarget: EventTarget = rootEl || window;
+
+    const handleScroll = () => {
+      if (isProgrammaticScrollRef.current) {
+        if (scrollSettleTimeoutRef.current) {
+          clearTimeout(scrollSettleTimeoutRef.current);
+        }
+        scrollSettleTimeoutRef.current = setTimeout(() => {
+          isProgrammaticScrollRef.current = false;
+          clearProgrammaticTimers();
+        }, 150);
+        return;
+      }
+
+      updateActiveHeading();
+    };
+
+    const handleUserScrollIntent = () => {
+      if (isProgrammaticScrollRef.current) {
+        isProgrammaticScrollRef.current = false;
+        clearProgrammaticTimers();
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(e.key)) {
+        handleUserScrollIntent();
+      }
+    };
+
+    scrollTarget.addEventListener('scroll', handleScroll, { passive: true });
+    scrollTarget.addEventListener('wheel', handleUserScrollIntent, { passive: true });
+    scrollTarget.addEventListener('touchstart', handleUserScrollIntent, { passive: true });
+    window.addEventListener('keydown', handleKeyDown, { passive: true });
+
     // 组件卸载时清理
     // Clean up when the component unmounts
     return () => {
       observerRef.current?.disconnect();
+      scrollTarget.removeEventListener('scroll', handleScroll);
+      scrollTarget.removeEventListener('wheel', handleUserScrollIntent);
+      scrollTarget.removeEventListener('touchstart', handleUserScrollIntent);
+      window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [filteredHeadings, setActiveId, rootEl]);
+  }, [filteredHeadings, setActiveId, rootEl, clearProgrammaticTimers]);
 
   // 切换面板展开/收起
   const toggleOpen = useCallback(() => {
@@ -232,18 +312,17 @@ export const TableOfContents: React.FC<TableOfContentsProps> = ({
 
   // 点击目录项
   const handleItemClick = useCallback((id: string) => {
+    clearProgrammaticTimers();
     isProgrammaticScrollRef.current = true;
     setActiveId(id);
     scrollToHeading(id);
 
-    if (scrollTimeoutRef.current) {
-      clearTimeout(scrollTimeoutRef.current);
-    }
-    // 假设平滑滚动最多耗时 1000ms
+    // 兜底上限：防止浏览器未触发 scroll 事件或滚动被提前打断导致锁死
     scrollTimeoutRef.current = setTimeout(() => {
       isProgrammaticScrollRef.current = false;
-    }, 1000);
-  }, [scrollToHeading, setActiveId]);
+      clearProgrammaticTimers();
+    }, 1200);
+  }, [scrollToHeading, setActiveId, clearProgrammaticTimers]);
 
   if (isInline) {
     return (
