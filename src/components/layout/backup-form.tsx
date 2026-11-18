@@ -26,6 +26,8 @@ interface BackupFormProps {
     onCancel?: () => void;
 }
 
+const EMPTY_STORAGE_IDS: number[] = [];
+
 export function BackupForm({ config, storages, onSubmit, onCancel }: BackupFormProps) {
     const { t } = useTranslation();
     const { handleBackupConfigUpdate } = useBackupHandle();
@@ -36,16 +38,24 @@ export function BackupForm({ config, storages, onSubmit, onCancel }: BackupFormP
     // 过滤出可用的存储
     const activeStorages = useMemo(() => storages.filter(s => s.isEnabled), [storages]);
 
-    // 解析存储 ID 数组，并过滤掉不可用的存储 ID
-    const initialStorageIds = useMemo(() => {
-        if (!config?.storageIds) return [];
+    // 解析存储 ID 数组，并过滤掉不可用的存储 ID；序列化为稳定字符串避免空数组新引用触发 reset
+    const initialStorageIdsJson = useMemo(() => {
+        if (!config?.storageIds) return "[]";
         try {
-            return (JSON.parse(config.storageIds) as number[])
-                .filter(id => activeStorages.some(s => Number(s.id) === id));
+            return JSON.stringify(
+                (JSON.parse(config.storageIds) as number[])
+                    .filter(id => activeStorages.some(s => Number(s.id) === id))
+            );
         } catch {
-            return [];
+            return "[]";
         }
     }, [config?.storageIds, activeStorages]);
+
+    const initialStorageIds = useMemo<number[]>(() => {
+        if (initialStorageIdsJson === "[]") return EMPTY_STORAGE_IDS;
+        return JSON.parse(initialStorageIdsJson) as number[];
+    }, [initialStorageIdsJson]);
+
     const [selectedStorageIds, setSelectedStorageIds] = useState<number[]>(initialStorageIds);
 
     useEffect(() => {
@@ -59,13 +69,13 @@ export function BackupForm({ config, storages, onSubmit, onCancel }: BackupFormP
         type: config?.type,
         cronStrategy: config?.cronStrategy || "daily",
         cronExpression: config?.cronExpression || "0 0 * * *",
-        storageIds: JSON.stringify(initialStorageIds),
+        storageIds: initialStorageIdsJson,
         isEnabled: config?.isEnabled ?? true,
         includeVaultName: config?.includeVaultName ?? false,
         passwordMode: config?.passwordMode ?? 0,
         passwordValue: config?.passwordValue || "",
         retentionDays: config?.retentionDays ?? 30,
-    }), [config?.vault, config?.type, config?.cronStrategy, config?.cronExpression, config?.isEnabled, config?.includeVaultName, config?.passwordMode, config?.passwordValue, config?.retentionDays, initialStorageIds]);
+    }), [config?.vault, config?.type, config?.cronStrategy, config?.cronExpression, config?.isEnabled, config?.includeVaultName, config?.passwordMode, config?.passwordValue, config?.retentionDays, initialStorageIdsJson]);
 
     const { register, handleSubmit, formState: { errors, isDirty }, setValue, watch, reset } = useForm<BackupFormData>({
         resolver: zodResolver(schema),
@@ -116,7 +126,7 @@ export function BackupForm({ config, storages, onSubmit, onCancel }: BackupFormP
             ? selectedStorageIds.filter(i => i !== id)
             : [...selectedStorageIds, id];
         setSelectedStorageIds(newIds);
-        setValue("storageIds", JSON.stringify(newIds));
+        setValue("storageIds", JSON.stringify(newIds), { shouldDirty: true, shouldValidate: true });
     };
 
     return (
@@ -126,8 +136,8 @@ export function BackupForm({ config, storages, onSubmit, onCancel }: BackupFormP
                 <div className="space-y-1.5">
                     <Label className="text-xs font-semibold text-muted-foreground ml-1">{t("ui.backup.vault")}</Label>
                     <Select
-                        onValueChange={(value) => setValue("vault", value)}
-                        value={selectedVault || undefined}>
+                        onValueChange={(value) => setValue("vault", value, { shouldDirty: true, shouldValidate: true })}
+                        value={selectedVault || ""}>
                         <SelectTrigger className="bg-background border-input">
                             <SelectValue placeholder={t("ui.backup.selectVault")} />
                         </SelectTrigger>
@@ -146,8 +156,8 @@ export function BackupForm({ config, storages, onSubmit, onCancel }: BackupFormP
                 <div className="space-y-1.5">
                     <Label className="text-xs font-semibold text-muted-foreground ml-1">{t("ui.backup.type")}</Label>
                     <Select
-                        onValueChange={(value) => setValue("type", value as BackupType)}
-                        value={watch("type")}>
+                        onValueChange={(value) => setValue("type", value as BackupType, { shouldDirty: true, shouldValidate: true })}
+                        value={watch("type") || ""}>
                         <SelectTrigger className="bg-background border-input">
                             <SelectValue placeholder={t("ui.backup.selectType")} />
                         </SelectTrigger>
@@ -168,7 +178,7 @@ export function BackupForm({ config, storages, onSubmit, onCancel }: BackupFormP
                             <Checkbox
                                 id="includeVaultName"
                                 checked={watch("includeVaultName")}
-                                onCheckedChange={(checked) => setValue("includeVaultName", Boolean(checked))}
+                                onCheckedChange={(checked) => setValue("includeVaultName", Boolean(checked), { shouldDirty: true })}
                             />
                             <Label htmlFor="includeVaultName" className="text-sm font-medium text-foreground">
                                 {t("ui.backup.includeVaultName.label")}
@@ -194,7 +204,7 @@ export function BackupForm({ config, storages, onSubmit, onCancel }: BackupFormP
                         <div className="space-y-1.5">
                             <Label className="text-xs font-semibold text-muted-foreground ml-1">{t("ui.backup.cronStrategy")}</Label>
                             <Select
-                                onValueChange={(value) => setValue("cronStrategy", value as CronStrategy)}
+                                onValueChange={(value) => setValue("cronStrategy", value as CronStrategy, { shouldDirty: true, shouldValidate: true })}
                                 value={cronStrategy || "daily"}>
                                 <SelectTrigger className="bg-background border-input">
                                     <SelectValue />
@@ -230,7 +240,7 @@ export function BackupForm({ config, storages, onSubmit, onCancel }: BackupFormP
                         <div className="space-y-1.5">
                             <Label className="text-xs font-semibold text-muted-foreground ml-1">{t("ui.backup.passwordMode")}</Label>
                             <Select
-                                onValueChange={(value) => setValue("passwordMode", Number(value))}
+                                onValueChange={(value) => setValue("passwordMode", Number(value), { shouldDirty: true, shouldValidate: true })}
                                 value={String(watch("passwordMode") ?? 0)}>
                                 <SelectTrigger className="bg-background border-input">
                                     <SelectValue />

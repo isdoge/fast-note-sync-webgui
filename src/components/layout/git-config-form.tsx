@@ -26,6 +26,8 @@ interface GitConfigFormProps {
     onCancel?: () => void
 }
 
+const DEFAULT_CONFIG_SYNC_RULES = [".obsidian/appearance.json", ".obsidian/community-plugins.json"];
+
 /**
  * Git 仓库配置表单组件
  */
@@ -39,10 +41,15 @@ export function GitConfigForm({ config, vaults, onSubmit, onCancel }: GitConfigF
 
     const schema = useMemo(() => createGitSyncSchema(t), [t])
 
+    const configSyncRulesJson = useMemo(
+        () => JSON.stringify(config?.configSyncRules || DEFAULT_CONFIG_SYNC_RULES),
+        [config?.configSyncRules]
+    )
+
     const defaultValues = useMemo(() => (
         config ? {
             id: config.id,
-            vault: config.vault,
+            vault: config.vault || "",
             repoUrl: config.repoUrl,
             branch: config.branch,
             username: config.username,
@@ -53,14 +60,16 @@ export function GitConfigForm({ config, vaults, onSubmit, onCancel }: GitConfigF
             includeConfig: config.includeConfig,
             configSyncRules: config.configSyncRules || [],
         } : {
+            vault: "",
             isEnabled: true,
             branch: "main",
             delay: 10,
             retentionDays: 30,
             includeConfig: false,
-            configSyncRules: [".obsidian/appearance.json", ".obsidian/community-plugins.json"],
+            configSyncRules: DEFAULT_CONFIG_SYNC_RULES,
         }
-    ), [config])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    ), [config?.id, config?.vault, config?.repoUrl, config?.branch, config?.username, config?.password, config?.isEnabled, config?.delay, config?.retentionDays, config?.includeConfig, configSyncRulesJson])
 
     const { register, handleSubmit, formState: { errors, isSubmitting, isDirty }, setValue, getValues, reset, watch, control } = useForm<GitSyncConfigRequest>({
         resolver: zodResolver(schema),
@@ -117,8 +126,8 @@ export function GitConfigForm({ config, vaults, onSubmit, onCancel }: GitConfigF
                     <Label htmlFor="vault" className="text-xs font-semibold text-muted-foreground ml-1">{t("ui.backup.vault")}</Label>
                     <Select
                         name="vault"
-                        onValueChange={(value) => setValue("vault", value)}
-                        value={selectedVault || undefined}>
+                        onValueChange={(value) => setValue("vault", value, { shouldDirty: true, shouldValidate: true })}
+                        value={selectedVault || ""}>
                         <SelectTrigger id="vault" className="bg-background border-input focus:ring-primary/20">
                             <SelectValue placeholder={t("ui.backup.selectVault")} />
                         </SelectTrigger>
