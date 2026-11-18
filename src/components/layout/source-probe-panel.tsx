@@ -13,7 +13,6 @@ export interface ProbeItem {
 
 export interface ProbeData {
     github: ProbeItem;
-    cnb: ProbeItem;
     recommended: string;
     selectedMode: string;
 }
@@ -89,34 +88,26 @@ export function SourceProbePanel({ token, mode, onApply }: SourceProbePanelProps
             )}
 
             {data && (
-                <div className="grid grid-cols-2 gap-2 rounded-xl border border-border p-3 bg-muted/30">
+                <div className="grid grid-cols-1 gap-2 rounded-xl border border-border p-3 bg-muted/30">
                     <ProbeRow
                         label="GitHub"
-                        ok={data.github.ok}
-                        latencyMs={data.github.latencyMs}
+                        ok={Boolean(data.github?.ok)}
+                        latencyMs={data.github?.latencyMs ?? 0}
                         isRecommended={data.recommended === "github"}
                         t={t}
                         prefix="github"
                     />
-                    <ProbeRow
-                        label="CNB"
-                        ok={data.cnb.ok}
-                        latencyMs={data.cnb.latencyMs}
-                        isRecommended={data.recommended === "cnb"}
-                        t={t}
-                        prefix="cnb"
-                    />
-                    {data.recommended && (
-                        <div className="col-span-2 pt-1 space-y-1">
+                    {data.recommended === "github" && (
+                        <div className="pt-1 space-y-1">
                             {mode !== "auto" && (
                                 <Button
                                     size="sm"
                                     className="rounded-xl"
-                                    onClick={() => onApply(data.recommended)}
+                                    onClick={() => onApply("github")}
                                 >
                                     <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />
                                     {t("ui.settings.pullSourceProbe.apply", {
-                                        source: data.recommended === "github" ? "GitHub" : "CNB",
+                                        source: "GitHub",
                                     })}
                                 </Button>
                             )}
