@@ -26,7 +26,7 @@ import {
 
 import { toast } from "@/components/common/Toast";
 import { useTheme } from "@/components/context/theme-context";
-import { useToc } from "@/components/context/toc-context";
+import { useToc } from "@/components/context/toc-store";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { getBrowserLang } from "@/i18n/utils";

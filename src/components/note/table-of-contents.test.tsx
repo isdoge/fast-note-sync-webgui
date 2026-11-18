@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { TableOfContents } from './table-of-contents';
-import { TocProvider, useToc } from '@/components/context/toc-context';
+import { TocProvider } from '@/components/context/toc-context';
+import { useToc } from '@/components/context/toc-store';
 import React from 'react';
 
 // Mock IntersectionObserver（jsdom 不支持）

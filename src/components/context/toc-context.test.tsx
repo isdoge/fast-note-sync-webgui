@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { TocProvider, useToc } from './toc-context';
+import { TocProvider } from './toc-context';
+import { useToc } from './toc-store';
 import React from 'react';
 
 describe('TocProvider', () => {

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useToc } from '@/components/context/toc-context';
+import { useToc } from '@/components/context/toc-store';
 import { motion, AnimatePresence } from 'motion/react';
 import { Button } from '@/components/ui/button';
 import { useTranslation } from 'react-i18next';
