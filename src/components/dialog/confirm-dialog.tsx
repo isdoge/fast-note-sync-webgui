@@ -1,6 +1,6 @@
 import { CheckCircle, XCircle, AlertTriangle, Info, HelpCircle, Rocket } from "lucide-react";
 import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import * as React from "react";
@@ -68,14 +68,31 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   const dialogType = (type in typeConfig ? type : "error") as DialogType
   const config = typeConfig[dialogType]
   const Icon = config.icon
+  const isConfirmLike = type === "confirm" || type === "upgrade"
 
-  // 处理 Enter 键
+  // 处理 Escape 与 Enter 键（捕获阶段优先处理 Escape，避免穿透到背景表单）
   React.useEffect(() => {
+    if (!isOpen) return
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!isOpen) return
-      if (e.key === "Enter") {
+      if (e.key === "Escape") {
         e.preventDefault()
-        if ((type === "confirm" || type === "upgrade") && onConfirm) {
+        e.stopPropagation()
+        onCancel()
+        return
+      }
+
+      if (e.key === "Enter") {
+        const target = e.target as HTMLElement | null
+        if (
+          target &&
+          (target.closest("input, textarea, select, button, a, [role='button'], .cm-editor") ||
+            target.isContentEditable)
+        ) {
+          return
+        }
+        e.preventDefault()
+        if (isConfirmLike && onConfirm) {
           onConfirm()
         } else {
           onCancel()
@@ -83,9 +100,9 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       }
     }
 
-    window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [isOpen, type, onConfirm, onCancel])
+    window.addEventListener("keydown", handleKeyDown, true)
+    return () => window.removeEventListener("keydown", handleKeyDown, true)
+  }, [isOpen, isConfirmLike, onConfirm, onCancel])
 
   const handleNonConfirmClose = () => {
     onCancel()
@@ -96,6 +113,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       <AlertDialogPrimitive.Portal>
         {/* Overlay with fade animation */}
         <AlertDialogPrimitive.Overlay
+          onClick={isConfirmLike ? undefined : handleNonConfirmClose}
           className={cn(
             "fixed inset-0 z-50 bg-black/60 backdrop-blur-sm",
             "data-[state=open]:animate-in data-[state=closed]:animate-out",
@@ -104,6 +122,11 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
         />
         {/* Content with scale and fade animation */}
         <AlertDialogPrimitive.Content
+          onEscapeKeyDown={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            onCancel()
+          }}
           className={cn(
             "fixed left-[50%] top-[50%] z-50 grid w-[calc(100vw-2rem)] translate-x-[-50%] translate-y-[-50%]",
             "gap-4 border bg-background p-4 sm:p-6 shadow-2xl duration-200 rounded-lg sm:rounded-xl",
@@ -131,7 +154,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
 
           {/* Footer with buttons */}
           <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 sm:gap-0 sm:space-x-2">
-            {(type === "confirm" || type === "upgrade") ? (
+            {isConfirmLike ? (
               <>
                 <AlertDialogPrimitive.Cancel
                   className={cn(buttonVariants({ variant: "outline" }), "w-full sm:w-auto rounded-xl")}
@@ -139,20 +162,23 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
                 >
                   {t("ui.common.cancel")}
                 </AlertDialogPrimitive.Cancel>
-                <AlertDialogPrimitive.Action
-                  className={cn(buttonVariants({ variant: type === "upgrade" ? "default" : "destructive" }), "w-full sm:w-auto rounded-xl")}
+                <Button
+                  type="button"
+                  variant={type === "upgrade" ? "default" : "destructive"}
+                  className="w-full sm:w-auto rounded-xl"
                   onClick={onConfirm}
                 >
                   {t(type === "upgrade" ? "ui.system.upgradeNow" : "ui.common.confirm")}
-                </AlertDialogPrimitive.Action>
+                </Button>
               </>
             ) : (
-              <AlertDialogPrimitive.Action
-                className={cn(buttonVariants({ variant: "default" }), "w-full sm:w-auto rounded-xl")}
+              <Button
+                type="button"
+                className="w-full sm:w-auto rounded-xl"
                 onClick={handleNonConfirmClose}
               >
                 {t("ui.common.close")}
-              </AlertDialogPrimitive.Action>
+              </Button>
             )}
           </div>
         </AlertDialogPrimitive.Content>

@@ -1,5 +1,5 @@
 // confirm-dialog-context.tsx
-import React, { createContext, useContext, useState, ReactNode } from "react";
+import React, { createContext, useCallback, useContext, useRef, useState, ReactNode } from "react";
 import { ConfirmDialog } from "@/components/dialog/confirm-dialog";
 
 
@@ -23,22 +23,31 @@ export const ConfirmDialogProvider: React.FC<{ children: ReactNode }> = ({ child
   const [handleConfirm, setHandleConfirm] = useState<() => void | undefined>()
   const [customChildren, setCustomChildren] = useState<ReactNode | undefined>()
   const [className, setClassName] = useState<string | undefined>()
+  const dialogSeqRef = useRef(0)
 
-  // 关闭对话框，只设置 isOpen 为 false，不重置其他状态
-  // 这样在关闭动画期间，对话框内容保持不变
-  const handleCancel = () => {
+  // 关闭对话框，只设置 isOpen 为 false，不重置展示文案与类型
+  // 这样在关闭动画期间，对话框内容保持不变；同时清理回调与递增序号防止状态竞态
+  const handleCancel = useCallback(() => {
+    dialogSeqRef.current += 1
     setIsDialogOpen(false)
-  }
+    setHandleConfirm(undefined)
+  }, [])
 
-  const handleConfirmClick = () => {
-    if (handleConfirm) {
-      handleConfirm()
+  const handleConfirmClick = useCallback(() => {
+    const seq = dialogSeqRef.current
+    const cb = handleConfirm
+    setHandleConfirm(undefined)
+    if (cb) {
+      cb()
     }
-    setIsDialogOpen(false)
-  }
+    if (dialogSeqRef.current === seq) {
+      setIsDialogOpen(false)
+    }
+  }, [handleConfirm])
 
-  const openConfirmDialog = React.useCallback((message: string, type?: string, onConfirm?: () => void, children?: ReactNode, className?: string) => {
-    // 打开时设置所有状态
+  const openConfirmDialog = useCallback((message: string, type?: string, onConfirm?: () => void, children?: ReactNode, className?: string) => {
+    // 打开时递增序列号并设置所有状态
+    dialogSeqRef.current += 1
     setMessage(message)
     setType(type || "confirm")
     setHandleConfirm(() => onConfirm)
