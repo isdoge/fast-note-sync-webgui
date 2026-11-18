@@ -499,11 +499,11 @@ const TokenManagerInner = (
 
 
         <Dialog open={isCreateOpen} onOpenChange={(open) => !open && closeCreateDialog()}>
-          <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto rounded-2xl">
-            <DialogHeader>
+          <DialogContent className="w-[calc(100vw-1.5rem)] sm:max-w-[600px] max-h-[90vh] flex flex-col gap-0 p-0 overflow-hidden rounded-2xl">
+            <DialogHeader className="px-5 sm:px-6 pt-5 sm:pt-6 pb-3 shrink-0 border-b border-border/40 pr-12">
               <DialogTitle className="flex items-center gap-2">
-                <Key className="h-5 w-5 text-primary" />
-                {isRotateMode ? (t("ui.token.rotateResultTitle") || "令牌轮换结果") : 
+                <Key className="h-5 w-5 text-primary shrink-0" />
+                {isRotateMode ? (t("ui.token.rotateResultTitle") || "令牌轮换结果") :
                  isEditMode ? (t("ui.token.editTitle") || "编辑令牌") : (t("ui.token.createTitle") || "创建新令牌")}
               </DialogTitle>
               <DialogDescription>
@@ -512,8 +512,9 @@ const TokenManagerInner = (
               </DialogDescription>
             </DialogHeader>
 
-            {!generatedToken ? (
-              <div className="grid grid-cols-2 gap-x-5 gap-y-4 py-4">
+            <div className="flex-1 min-h-0 overflow-y-auto px-5 sm:px-6 py-4">
+              {!generatedToken ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4">
                 {/* 第一行：备注名称 和 客户端限制 */}
                 <div className="space-y-2">
                   <Label htmlFor="clientType" className="text-sm font-bold text-muted-foreground flex items-center gap-2">
@@ -594,7 +595,7 @@ const TokenManagerInner = (
                 </div>
 
                 {/* 第三行：内容限制（全宽） */}
-                <div className="col-span-2 space-y-2">
+                <div className="sm:col-span-2 space-y-2">
                   <Label htmlFor="funcDim" className="text-sm font-bold text-muted-foreground flex items-center gap-2">
                     <ShieldCheck className="h-3 w-3" />
                     <span className="flex items-center gap-1">
@@ -604,7 +605,7 @@ const TokenManagerInner = (
                       </Tooltip>
                     </span>
                   </Label>
-                  <div className="grid grid-cols-2 gap-y-3 gap-x-4 p-3 rounded-xl bg-muted/50 border border-border">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-3 gap-x-4 p-3 rounded-xl bg-muted/50 border border-border">
                     {/* Notes Column */}
                     <div className="space-y-2">
                       <div className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-wider mb-1 px-1 border-b border-border/30 pb-1">
@@ -691,7 +692,7 @@ const TokenManagerInner = (
                       ))}
                     </div>
 
-                    <div className="col-span-2 border-t border-border/50 pt-2 mt-1">
+                    <div className="sm:col-span-2 border-t border-border/50 pt-2 mt-1">
                       <div className="flex items-center space-x-2">
                         <Checkbox
                           id="f-all"
@@ -706,7 +707,7 @@ const TokenManagerInner = (
                 </div>
 
                 {/* 笔记库限制（全宽） */}
-                <div className="col-span-2 space-y-2">
+                <div className="sm:col-span-2 space-y-2">
                   <Label className="text-sm font-bold text-muted-foreground flex items-center gap-2">
                     <Globe className="h-3 w-3" />
                     <span className="flex items-center gap-1">
@@ -789,29 +790,30 @@ const TokenManagerInner = (
                   </p>
                 </div>
               </div>
-            ) : (
-              <div className="space-y-4 py-4 animate-in fade-in zoom-in-95 duration-300">
-                <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs flex gap-2">
-                  <ShieldAlert className="h-4 w-4 shrink-0" />
-                  <p>{t("ui.token.warning") || "请务必复制并妥善保存此令牌。出于安全原因，它将不会再次显示。"}</p>
-                </div>
-                <div className="relative group">
-                  <div className="p-4 rounded-xl bg-muted font-mono text-sm break-all pr-12 border border-border">
-                    {generatedToken}
+              ) : (
+                <div className="space-y-4 animate-in fade-in zoom-in-95 duration-300">
+                  <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs flex gap-2">
+                    <ShieldAlert className="h-4 w-4 shrink-0" />
+                    <p>{t("ui.token.warning") || "请务必复制并妥善保存此令牌。出于安全原因，它将不会再次显示。"}</p>
                   </div>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="absolute right-2 top-2 h-8 w-8 rounded-lg"
-                    onClick={handleCopy}
-                  >
-                    {isCopied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
-                  </Button>
+                  <div className="relative group">
+                    <div className="p-4 rounded-xl bg-muted font-mono text-sm break-all pr-12 border border-border">
+                      {generatedToken}
+                    </div>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="absolute right-2 top-2 h-8 w-8 rounded-lg"
+                      onClick={handleCopy}
+                    >
+                      {isCopied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
 
-            <DialogFooter>
+            <DialogFooter className="px-5 sm:px-6 py-3 sm:py-4 shrink-0 border-t border-border/40 bg-background flex-row justify-end gap-2 sm:space-x-0">
               {!generatedToken ? (
                 <>
                   <Button variant="ghost" onClick={closeCreateDialog} className="rounded-xl">
