@@ -18,6 +18,8 @@ import { cn } from "@/lib/utils";
 import env from "@/env.ts";
 
 
+const SERVICE_REPO_URL = "https://github.com/isdoge/fast-note-sync-service"
+
 const getSafeHttpUrl = (url?: string | null): string | null => {
     if (!url) return null
     try {
@@ -51,7 +53,9 @@ export function VersionOverview({ showUpgrade = true, children }: { showUpgrade?
         }
     }, [])
 
-    const safeVersionNewLink = getSafeHttpUrl(versionInfo?.versionNewLink)
+    const currentVersionUrl = versionInfo?.version
+        ? getSafeHttpUrl(`${SERVICE_REPO_URL}/releases/tag/${encodeURIComponent(versionInfo.version)}`)
+        : null
     const safeReleaseUrl = getSafeHttpUrl(updateResult?.releaseUrl || versionInfo?.versionNewLink)
 
     const handleCheckUpdate = async () => {
@@ -229,7 +233,7 @@ export function VersionOverview({ showUpgrade = true, children }: { showUpgrade?
                         <span>{t("ui.system.repo")}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                    <a href="https://github.com/isdoge/fast-note-sync-service" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline truncate max-w-37.5 sm:max-w-none">
+                    <a href={SERVICE_REPO_URL} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline truncate max-w-37.5 sm:max-w-none">
                         {t("ui.system.githubRepo")}
                     </a>
                 </div>
@@ -244,9 +248,9 @@ export function VersionOverview({ showUpgrade = true, children }: { showUpgrade?
                             <code className="font-mono text-muted-foreground">{t("ui.common.loading")}</code>
                         ) : (
                             <>
-                                {safeVersionNewLink ? (
+                                {currentVersionUrl ? (
                                     <a
-                                        href={safeVersionNewLink}
+                                        href={currentVersionUrl}
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         className="font-mono text-primary hover:underline"
