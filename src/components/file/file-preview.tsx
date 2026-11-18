@@ -1,9 +1,17 @@
 import { X, ExternalLink, Download, FileText, FileCode, Paperclip, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { useRef, useEffect, useState } from "react";
+import CodeMirror from "@uiw/react-codemirror";
+import { useTheme } from "@/components/context/theme-context";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "react-i18next";
 import { File } from "@/lib/types/file";
+import {
+    decodeTextPreviewBuffer,
+    getFileCategory,
+    isTextPreviewCategory,
+    MAX_TEXT_PREVIEW_BYTES,
+} from "@/lib/utils/file-preview";
 
 
 interface FilePreviewProps {
@@ -12,23 +20,141 @@ interface FilePreviewProps {
     onClose: () => void;
 }
 
+type TextPreviewStatus = "idle" | "loading" | "ready" | "too_large" | "binary" | "error";
+
+async function readResponseUpTo(response: Response, maxBytes: number): Promise<ArrayBuffer | null> {
+    if (response.body && typeof response.body.getReader === "function") {
+        const reader = response.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let totalBytes = 0;
+
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                if (!value) continue;
+
+                totalBytes += value.byteLength;
+                if (totalBytes > maxBytes) {
+                    await reader.cancel().catch(() => undefined);
+                    return null;
+                }
+                chunks.push(value);
+            }
+        } finally {
+            reader.releaseLock?.();
+        }
+
+        const merged = new Uint8Array(totalBytes);
+        let offset = 0;
+        for (const chunk of chunks) {
+            merged.set(chunk, offset);
+            offset += chunk.byteLength;
+        }
+        return merged.buffer;
+    }
+
+    const buffer = await response.arrayBuffer();
+    if (buffer.byteLength > maxBytes) {
+        return null;
+    }
+    return buffer;
+}
+
 export function FilePreview({ file, url, onClose }: FilePreviewProps) {
     const { t } = useTranslation();
-    const ext = file.path.split('.').pop()?.toLowerCase() || '';
-    const isImage = ['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp', 'bmp'].includes(ext);
-    const isAudio = ['mp3', 'wav', 'flac', 'ogg', 'm4a'].includes(ext);
-    const isVideo = ['mp4', 'webm', 'mkv', 'avi', 'mov'].includes(ext);
-    const isPdf = ext === 'pdf';
-    const isCode = ['js', 'ts', 'jsx', 'tsx', 'py', 'sh', 'bat', 'go', 'css', 'html', 'json', 'c', 'cpp', 'rs', 'php'].includes(ext);
+    const { resolvedTheme } = useTheme();
+    const category = getFileCategory(file.path);
+    const isImage = category === "image";
+    const isAudio = category === "audio";
+    const isVideo = category === "video";
+    const isPdf = category === "pdf";
+    const isCode = category === "code";
+    const isText = category === "text";
+    const isTextPreview = isTextPreviewCategory(category);
 
     const fileName = file.path.split('/').pop() || file.path;
     const mediaRef = useRef<HTMLMediaElement>(null);
-    const [isLoading, setIsLoading] = useState(true);
+    const [isLoading, setIsLoading] = useState(isImage || isAudio || isVideo || isTextPreview);
+    const [textContent, setTextContent] = useState("");
+    const [textStatus, setTextStatus] = useState<TextPreviewStatus>(isTextPreview ? "loading" : "idle");
 
-    // 当 URL 变化时重置加载状态
+    // 当 URL 或文件类型变化时重置加载状态
     useEffect(() => {
+        if (!isTextPreview) {
+            setTextContent("");
+            setTextStatus("idle");
+            setIsLoading(isImage || isAudio || isVideo);
+            return;
+        }
+
+        if (file.size > MAX_TEXT_PREVIEW_BYTES) {
+            setTextContent("");
+            setTextStatus("too_large");
+            setIsLoading(false);
+            return;
+        }
+
+        const controller = new AbortController();
         setIsLoading(true);
-    }, [url]);
+        setTextStatus("loading");
+        setTextContent("");
+
+        const loadTextPreview = async () => {
+            try {
+                const response = await fetch(url, { signal: controller.signal });
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const contentLengthHeader = response.headers?.get?.("content-length");
+                if (contentLengthHeader) {
+                    const contentLength = Number(contentLengthHeader);
+                    if (Number.isFinite(contentLength) && contentLength > MAX_TEXT_PREVIEW_BYTES) {
+                        if (!controller.signal.aborted) {
+                            setTextStatus("too_large");
+                            setIsLoading(false);
+                        }
+                        return;
+                    }
+                }
+
+                const buffer = await readResponseUpTo(response, MAX_TEXT_PREVIEW_BYTES);
+                if (controller.signal.aborted) return;
+
+                if (buffer === null) {
+                    setTextStatus("too_large");
+                    setIsLoading(false);
+                    return;
+                }
+
+                const decoded = decodeTextPreviewBuffer(buffer, MAX_TEXT_PREVIEW_BYTES);
+                if (controller.signal.aborted) return;
+
+                if (decoded.ok) {
+                    setTextContent(decoded.text);
+                    setTextStatus("ready");
+                } else {
+                    setTextStatus(decoded.reason);
+                }
+            } catch (error) {
+                if (controller.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) {
+                    return;
+                }
+                setTextStatus("error");
+            } finally {
+                if (!controller.signal.aborted) {
+                    setIsLoading(false);
+                }
+            }
+        };
+
+        void loadTextPreview();
+
+        return () => {
+            controller.abort();
+        };
+    }, [url, file.size, isImage, isAudio, isVideo, isTextPreview]);
 
     // 加载记忆的音量
     useEffect(() => {
@@ -47,19 +173,41 @@ export function FilePreview({ file, url, onClose }: FilePreviewProps) {
         setIsLoading(false);
     };
 
+    const previewHeaderLabel = isImage
+        ? t("ui.file.imagePreview")
+        : isAudio
+            ? t("ui.file.audioPreview")
+            : isVideo
+                ? t("ui.file.videoPreview")
+                : isPdf
+                    ? t("ui.file.pdfPreview")
+                    : isCode
+                        ? t("ui.file.codePreview")
+                        : isText
+                            ? t("ui.file.textPreview")
+                            : t("ui.file.fileDetail");
+
+    const fallbackMessage = textStatus === "too_large"
+        ? t("ui.file.textTooLarge")
+        : textStatus === "binary"
+            ? t("ui.file.binaryPreviewFallback")
+            : textStatus === "error"
+                ? t("ui.file.previewLoadError")
+                : t("ui.file.unsupportedPreview");
+
     return (
         <AnimatePresence>
             <motion.div
                 initial={{ opacity: 0, y: 50, scale: 0.9 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 50, scale: 0.9 }}
-                className="fixed bottom-6 right-6 z-100 w-[320px] sm:w-100 bg-card border border-border rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]"
+                className={`fixed bottom-6 right-6 z-100 ${isTextPreview ? "w-[90vw] sm:w-[600px] max-w-[90vw]" : "w-[320px] sm:w-100"} bg-card border border-border rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]`}
             >
                 {/* 头部 */}
                 <div className="flex items-center justify-between p-3 border-b border-border bg-muted/50">
                     <div className="flex flex-col min-w-0">
                         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                            {isImage ? t("ui.file.imagePreview") : isAudio ? t("ui.file.audioPreview") : isVideo ? t("ui.file.videoPreview") : isPdf ? t("ui.file.pdfPreview") : isCode ? t("ui.file.codePreview") : t("ui.file.detail")}
+                            {previewHeaderLabel}
                         </span>
                         <h3 className="text-sm font-semibold truncate pr-2" title={fileName}>
                             {fileName}
@@ -149,13 +297,30 @@ export function FilePreview({ file, url, onClose }: FilePreviewProps) {
                             onError={handleLoaded}
                         />
                     )}
-                    {!isImage && !isAudio && !isVideo && (
+                    {isTextPreview && textStatus === "ready" && (
+                        <div className="w-full max-h-[60vh] overflow-auto rounded-lg border border-border bg-background text-left font-mono [&_.cm-editor]:font-mono [&_.cm-scroller]:overflow-auto">
+                            <CodeMirror
+                                value={textContent}
+                                readOnly={true}
+                                editable={false}
+                                theme={resolvedTheme === "dark" ? "dark" : "light"}
+                                basicSetup={{
+                                    lineNumbers: true,
+                                    foldGutter: false,
+                                    highlightActiveLine: false,
+                                    highlightActiveLineGutter: false,
+                                }}
+                                className="text-xs font-mono"
+                            />
+                        </div>
+                    )}
+                    {!isImage && !isAudio && !isVideo && !(isTextPreview && (textStatus === "ready" || textStatus === "loading")) && (
                         <div className="flex flex-col items-center gap-4 py-6">
                             <div className="w-20 h-20 rounded-2xl bg-primary/5 flex items-center justify-center text-primary/60 border border-primary/10">
-                                {isPdf ? <FileText className="w-10 h-10" /> : isCode ? <FileCode className="w-10 h-10" /> : <Paperclip className="w-10 h-10" />}
+                                {isPdf || isText ? <FileText className="w-10 h-10" /> : isCode ? <FileCode className="w-10 h-10" /> : <Paperclip className="w-10 h-10" />}
                             </div>
                             <div className="text-center">
-                                <p className="text-sm text-muted-foreground">{t("ui.file.unsupportedPreview")}</p>
+                                <p className="text-sm text-muted-foreground">{fallbackMessage}</p>
                                 <Button
                                     variant="link"
                                     className="text-primary mt-1 h-auto p-0"

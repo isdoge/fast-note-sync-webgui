@@ -20,6 +20,7 @@ import { ShareModal } from "@/components/share/share-modal";
 import { DndContext, useDraggable, useDroppable, DragEndEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { cn } from "@/lib/utils";
 import { FilePreview } from "@/components/file/file-preview";
+import { getFileCategory } from "@/lib/utils/file-preview";
 import { useFileHandle } from "@/components/api-handle/file-handle";
 import { File as FileDTO, FileListResponse } from "@/lib/types/file";
 import { useMobile } from "@/hooks/use-mobile";
@@ -806,31 +807,21 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
      * 根据文件后缀获取对应的图标 / Get icon by file extension
      */
     const getFileIcon = (path: string) => {
-        const ext = path.split('.').pop()?.toLowerCase() || '';
-
-        // 图片类型 / Image types
-        if (['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp', 'bmp'].includes(ext)) {
-            return <Image className="h-5 w-5" />;
+        switch (getFileCategory(path)) {
+            case "image":
+                return <Image className="h-5 w-5" />;
+            case "pdf":
+            case "text":
+                return <FileText className="h-5 w-5" />;
+            case "audio":
+                return <Music className="h-5 w-5" />;
+            case "video":
+                return <Video className="h-5 w-5" />;
+            case "code":
+                return <FileCode className="h-5 w-5" />;
+            default:
+                return <Paperclip className="h-5 w-5" />;
         }
-        // PDF 类型 / PDF types
-        if (ext === 'pdf') {
-            return <FileText className="h-5 w-5" />;
-        }
-        // 音频类型 / Audio types
-        if (['mp3', 'wav', 'flac', 'ogg', 'm4a'].includes(ext)) {
-            return <Music className="h-5 w-5" />;
-        }
-        // 视频类型 / Video types
-        if (['mp4', 'webm', 'mkv', 'avi', 'mov'].includes(ext)) {
-            return <Video className="h-5 w-5" />;
-        }
-        // 脚本/代码类型 / Script and Code types
-        if (['js', 'ts', 'jsx', 'tsx', 'py', 'sh', 'bat', 'go', 'css', 'html', 'json', 'c', 'cpp', 'rs', 'php'].includes(ext)) {
-            return <FileCode className="h-5 w-5" />;
-        }
-
-        // 默认类型 / Default types
-        return <Paperclip className="h-5 w-5" />;
     };
 
     const toggleSelectAll = () => {
