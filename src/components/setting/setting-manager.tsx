@@ -1,12 +1,13 @@
 import { useVaultHandle } from "@/components/api-handle/vault-handle";
 import { VaultType } from "@/lib/types/vault";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FileJson, Search, RefreshCw, Plus, X } from "lucide-react";
 import { SettingList } from "./setting-list";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { useRealtimeStore } from "@/stores/realtime-store";
 
 
 interface SettingManagerProps {
@@ -24,7 +25,20 @@ export function SettingManager({ vault, onVaultChange }: SettingManagerProps) {
     const [searchKeyword, setSearchKeyword] = useState("");
     const [currentPage, setCurrentPage] = useState(1);
     const [refreshSignal, setRefreshSignal] = useState(0);
-    const [onAddFn, setOnAddFn] = useState<(() => void) | null>(null);
+    const onAddFnRef = useRef<(() => void) | null>(null);
+    const handleRegisterAdd = useCallback((fn: () => void) => {
+        onAddFnRef.current = fn;
+    }, []);
+    const settingsRevision = useRealtimeStore(state => state.revisions.settings);
+    const lastSettingsRevisionRef = useRef(settingsRevision);
+
+    useEffect(() => {
+        if (settingsRevision === lastSettingsRevisionRef.current) return;
+        lastSettingsRevisionRef.current = settingsRevision;
+        if (vault) {
+            setRefreshSignal(prev => prev + 1);
+        }
+    }, [settingsRevision, vault]);
 
     useEffect(() => {
         handleVaultList((data) => {
@@ -104,8 +118,8 @@ export function SettingManager({ vault, onVaultChange }: SettingManagerProps) {
                         >
                             <RefreshCw className="h-4 w-4" />
                         </Button>
-                        <Button 
-                            onClick={() => onAddFn?.()}
+                        <Button
+                            onClick={() => onAddFnRef.current?.()}
                             className="h-10 rounded-xl shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all font-bold px-4"
                         >
                             <Plus className="h-4 w-4 mr-1.5" />
@@ -121,7 +135,7 @@ export function SettingManager({ vault, onVaultChange }: SettingManagerProps) {
                 currentPage={currentPage}
                 onPageChange={setCurrentPage}
                 refreshSignal={refreshSignal}
-                onRegisterAdd={(fn) => setOnAddFn(() => fn)}
+                onRegisterAdd={handleRegisterAdd}
             />
         </div>
     );

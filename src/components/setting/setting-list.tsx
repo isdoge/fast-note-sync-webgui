@@ -1,7 +1,7 @@
 import { Pencil, Trash2, TextCursorInput, Clock, ChevronLeft, ChevronRight, FileCode, FileJson, FileType, FileText, Image as ImageIcon, FileBox } from "lucide-react";
 import { useConfirmDialog } from "@/components/context/confirm-dialog-context";
 import { useSettingHandle } from "@/components/api-handle/setting-handle";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { markdown } from "@codemirror/lang-markdown";
 import { Tooltip } from "@/components/ui/tooltip";
 import { SettingItem } from "@/lib/types/setting";
@@ -42,15 +42,19 @@ export function SettingList({
     // 分页状态
     const [totalItems, setTotalItems] = useState(0);
     const pageSize = 20;
+    const settingRequestIdRef = useRef(0);
 
     const fetchSettings = useCallback(() => {
         if (!vault) return;
+        const requestId = ++settingRequestIdRef.current;
         setLoading(true);
         handleSettingList(vault, (data) => {
+            if (requestId !== settingRequestIdRef.current) return;
             setSettings(data.list || []);
             setTotalItems(data.pager?.totalRows || 0);
             setLoading(false);
         }, () => {
+            if (requestId !== settingRequestIdRef.current) return;
             setLoading(false);
         }, searchKeyword, currentPage, pageSize);
     }, [handleSettingList, vault, searchKeyword, currentPage]);

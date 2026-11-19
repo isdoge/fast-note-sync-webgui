@@ -1036,4 +1036,12 @@ export default {
     "ui.unsaved.message": "您有未儲存的更改。確定要離開此頁面嗎？更改將遺失。",
     "ui.unsaved.leave": "離開",
     "ui.unsaved.stay": "留下",
+
+    // --- ui.realtime ---
+    "ui.realtime.remoteUpdatedConflict": "該筆記已在其他裝置更新，是否重新載入最新內容？（目前未儲存的修改不會被覆蓋）",
+    "ui.realtime.reloadRemote": "重新載入",
+    "ui.realtime.keepCurrent": "保留目前",
+    "ui.realtime.remoteDeletedMessage": "該筆記已在其他裝置被刪除，已暫停自動儲存以免重新寫入。",
+    "ui.realtime.remoteDeletedToast": "目前開啟的檔案已在其他裝置被刪除",
+    "ui.realtime.backToList": "返回列表",
 };

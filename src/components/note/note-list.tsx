@@ -333,9 +333,16 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
     const [batchRestoreProgress, setBatchRestoreProgress] = useState<{ current: number; total: number } | null>(null);
     const [folders, setFolders] = useState<Folder[]>([]);
     const noteRequestIdRef = useRef(0);
+    const shareRequestIdRef = useRef(0);
     const { trashType, setModule } = useAppStore();
     const notesRevision = useRealtimeStore(state => state.revisions.notes);
     const treeRevision = useRealtimeStore(state => state.revisions.tree);
+    const filesRevision = useRealtimeStore(state => state.revisions.files);
+    const sharesRevision = useRealtimeStore(state => state.revisions.shares);
+    const trashRevision = useRealtimeStore(state => state.revisions.trash);
+    const lastChangeSeq = useRealtimeStore(state => state.lastChangeSeq);
+    const lastChangeEvent = useRealtimeStore(state => state.lastChangeEvent);
+    const handledPreviewChangeSeqRef = useRef(lastChangeSeq);
     const [shareModalOpen, setShareModalOpen] = useState(false);
     const [selectedShareNote, setSelectedShareNote] = useState<Note | null>(null);
     // 仅存储有效分享的笔记路径集合，替代原来的完整 ShareItem 列表
@@ -344,7 +351,9 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
 
     const refreshShareItems = () => {
         if (isRecycle) return;
+        const requestId = ++shareRequestIdRef.current;
         handleGetNoteSharePaths(vault, (paths) => {
+            if (requestId !== shareRequestIdRef.current) return;
             // 内容未变化时跳过更新，避免触发不必要的全列表重渲染
             // Skip update when content is unchanged to avoid unnecessary full list re-render
             setActiveSharePaths(prev => {
@@ -359,7 +368,7 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
     useEffect(() => {
         refreshShareItems();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [vault]);
+    }, [vault, sharesRevision]);
 
     // 活跃分享路径集合即为 activeSharePaths（已按 vault 过滤）
     // Active note path set is already filtered by vault on backend
@@ -504,9 +513,13 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
         }
     };
 
-    const coreRealtimeRevision = !isRecycle
-        ? (viewMode === "folder" || isMixedSearch ? notesRevision + treeRevision : viewMode === "flat" ? notesRevision : 0)
-        : 0;
+    const listRealtimeRevision = isRecycle
+        ? trashRevision
+        : viewMode === "flat-file"
+            ? filesRevision
+            : isMixedSearch || viewMode === "folder"
+                ? notesRevision + treeRevision + filesRevision
+                : notesRevision;
 
     useEffect(() => {
         setSelectedPaths(new Set()); // 清空选中
@@ -516,7 +529,60 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
         console.log("[NoteList] fetchNotes triggered:", { currentPath, currentPathHash });
         fetchNotes(page, pageSize, filePage, filePageSize, debouncedKeyword);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [vault, page, pageSize, filePage, filePageSize, debouncedKeyword, filterType, isRecycle, searchMode, sortBy, sortOrder, viewMode, currentPath, currentPathHash, shareFilter, shareFilterActiveDep, coreRealtimeRevision]);
+    }, [vault, page, pageSize, filePage, filePageSize, debouncedKeyword, filterType, isRecycle, searchMode, sortBy, sortOrder, viewMode, currentPath, currentPathHash, shareFilter, shareFilterActiveDep, listRealtimeRevision]);
+
+    // 实时同步：当前正在预览的附件发生更新/重命名/删除时联动刷新
+    useEffect(() => {
+        if (lastChangeSeq === handledPreviewChangeSeqRef.current) return;
+        handledPreviewChangeSeqRef.current = lastChangeSeq;
+
+        if (!previewFile || !lastChangeEvent) return;
+        if (lastChangeEvent.vault && lastChangeEvent.vault !== vault) return;
+
+        if (lastChangeEvent.action === "FileSyncUpdate") {
+            const matched = lastChangeEvent.pathHash
+                ? lastChangeEvent.pathHash === previewFile.pathHash
+                : lastChangeEvent.path === previewFile.path;
+            if (matched) {
+                let url = getRawFileUrl(vault, previewFile.path, previewFile.pathHash?.toString());
+                if (isRecycle) {
+                    url += (url.includes("?") ? "&" : "?") + "isRecycle=1";
+                }
+                const sep = url.includes("?") ? "&" : "?";
+                setPreviewUrl(`${url}${sep}_=${Date.now()}_${lastChangeSeq}`);
+            }
+            return;
+        }
+
+        if (lastChangeEvent.action === "FileSyncDelete" && !isRecycle) {
+            const matched = lastChangeEvent.pathHash
+                ? lastChangeEvent.pathHash === previewFile.pathHash
+                : lastChangeEvent.path === previewFile.path;
+            if (matched) {
+                setPreviewFile(null);
+                setPreviewUrl("");
+            }
+            return;
+        }
+
+        if (lastChangeEvent.action === "FileSyncRename") {
+            const matched = lastChangeEvent.oldPathHash
+                ? lastChangeEvent.oldPathHash === previewFile.pathHash
+                : lastChangeEvent.oldPath === previewFile.path;
+            if (matched && lastChangeEvent.path) {
+                const nextPath = lastChangeEvent.path;
+                const nextPathHash = lastChangeEvent.pathHash || previewFile.pathHash;
+                const updatedFile = { ...previewFile, path: nextPath, pathHash: nextPathHash };
+                let url = getRawFileUrl(vault, nextPath, nextPathHash?.toString());
+                if (isRecycle) {
+                    url += (url.includes("?") ? "&" : "?") + "isRecycle=1";
+                }
+                const sep = url.includes("?") ? "&" : "?";
+                setPreviewFile(updatedFile);
+                setPreviewUrl(`${url}${sep}_=${Date.now()}_${lastChangeSeq}`);
+            }
+        }
+    }, [lastChangeSeq, lastChangeEvent, previewFile, vault, isRecycle, getRawFileUrl]);
 
     useEffect(() => {
         if (debouncedKeyword.trim() && !isRecycle) {

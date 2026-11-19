@@ -1,0 +1,191 @@
+import { act, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { NoteList, type ShareFilterType, type ViewModeType } from "./note-list";
+import { useRealtimeStore } from "@/stores/realtime-store";
+import type { File as FileDTO, FileListResponse } from "@/lib/types/file";
+import type { Note, NoteListResponse } from "@/lib/types/note";
+
+const mocks = vi.hoisted(() => ({
+    handleNoteList: vi.fn(),
+    handleFolderList: vi.fn(),
+    handleFolderNotes: vi.fn(),
+    handleFolderFiles: vi.fn(),
+    handleFileList: vi.fn(),
+    handleGetNoteSharePaths: vi.fn(),
+    handleNoteListByPaths: vi.fn(),
+}));
+
+vi.mock("react-i18next", () => ({
+    useTranslation: () => ({
+        t: (key: string) => key,
+    }),
+}));
+
+vi.mock("@/components/api-handle/note-handle", () => ({
+    useNoteHandle: () => ({
+        handleNoteList: mocks.handleNoteList,
+        handleDeleteNote: vi.fn(),
+        handleRestoreNote: vi.fn(),
+        handleFolderList: mocks.handleFolderList,
+        handleFolderNotes: mocks.handleFolderNotes,
+        handlePermanentDeleteNote: vi.fn(),
+        handleClearNoteRecycle: vi.fn(),
+        handleRenameNote: vi.fn(),
+        handleNoteListByPaths: mocks.handleNoteListByPaths,
+        handleDeleteFolder: vi.fn(),
+        handleCreateFolder: vi.fn(),
+    }),
+}));
+
+vi.mock("@/components/api-handle/file-handle", () => ({
+    useFileHandle: () => ({
+        handleFileList: mocks.handleFileList,
+        handleDeleteFile: vi.fn(),
+        getRawFileUrl: vi.fn((v: string, p: string) => `/api/file?vault=${v}&path=${p}`),
+        handleFolderFiles: mocks.handleFolderFiles,
+        handleRenameFile: vi.fn(),
+        handleFileUpload: vi.fn(),
+    }),
+}));
+
+vi.mock("@/components/api-handle/share-handle", () => ({
+    useShareHandle: () => ({
+        handleGetNoteSharePaths: mocks.handleGetNoteSharePaths,
+    }),
+}));
+
+vi.mock("@/components/context/confirm-dialog-context", () => ({
+    useConfirmDialog: () => ({
+        openConfirmDialog: vi.fn(),
+    }),
+}));
+
+vi.mock("@/hooks/use-mobile", () => ({
+    useMobile: () => false,
+}));
+
+vi.mock("@/components/share/share-modal", () => ({
+    ShareModal: () => null,
+}));
+
+vi.mock("@/components/file/file-preview", () => ({
+    FilePreview: () => null,
+}));
+
+vi.mock("@/components/ui/tooltip", () => ({
+    Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
+vi.mock("@/components/ui/dropdown-menu", () => ({
+    DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+    DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+    DropdownMenuItem: ({ children }: { children: React.ReactNode }) => <button type="button">{children}</button>,
+}));
+
+function Harness({ initialViewMode = "flat-file", isRecycle = false }: { initialViewMode?: ViewModeType; isRecycle?: boolean }) {
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(10);
+    const [searchKeyword, setSearchKeyword] = useState("");
+    const [currentPath, setCurrentPath] = useState("");
+    const [currentPathHash, setCurrentPathHash] = useState("");
+    const [pathHashMap, setPathHashMap] = useState<Record<string, string>>({});
+    const [shareFilter, setShareFilter] = useState<ShareFilterType>(null);
+    const [viewMode, setViewMode] = useState<ViewModeType>(initialViewMode);
+
+    return (
+        <NoteList
+            vault="doge"
+            onSelectNote={vi.fn()}
+            onCreateNote={vi.fn()}
+            page={page}
+            setPage={setPage}
+            pageSize={pageSize}
+            setPageSize={setPageSize}
+            onViewHistory={vi.fn()}
+            isRecycle={isRecycle}
+            searchKeyword={searchKeyword}
+            setSearchKeyword={setSearchKeyword}
+            currentPath={currentPath}
+            setCurrentPath={setCurrentPath}
+            currentPathHash={currentPathHash}
+            setCurrentPathHash={setCurrentPathHash}
+            pathHashMap={pathHashMap}
+            setPathHashMap={setPathHashMap}
+            shareFilter={shareFilter}
+            setShareFilter={setShareFilter}
+            viewMode={viewMode}
+            setViewMode={setViewMode}
+        />
+    );
+}
+
+describe("NoteList realtime scopes (shares, files, trash)", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        useRealtimeStore.getState().reset();
+        mocks.handleGetNoteSharePaths.mockImplementation((_v: string, cb: (p: string[]) => void) => cb([]));
+        mocks.handleFolderList.mockImplementation((_v: string, _p: string, _ph: string, cb: (d: unknown[]) => void) => cb([]));
+        mocks.handleFolderNotes.mockImplementation((_v: string, _p: string, _ph: string, _pg: number, _ps: number, _sb: string, _so: string, cb: (d: NoteListResponse) => void) =>
+            cb({ list: [], pager: { page: 1, pageSize: 10, totalRows: 0 } })
+        );
+        mocks.handleFolderFiles.mockImplementation((_v: string, _p: string, _ph: string, _pg: number, _ps: number, _sb: string, _so: string, cb: (d: FileListResponse) => void) =>
+            cb({ list: [], pager: { page: 1, pageSize: 10, totalRows: 0, totalPages: 0 } })
+        );
+        mocks.handleFileList.mockImplementation((_v: string, _pg: number, _ps: number, _r: boolean, _kw: string, _sb: string, _so: string, cb: (d: FileListResponse) => void) =>
+            cb({
+                list: [{ path: "a.png", pathHash: "h-a", contentHash: "c-a", size: 1, ctime: 1, mtime: 1, lastTime: 1 }] as FileDTO[],
+                pager: { page: 1, pageSize: 10, totalRows: 1, totalPages: 1 },
+            })
+        );
+        mocks.handleNoteList.mockImplementation((_v: string, _pg: number, _ps: number, _kw: string, _r: boolean, _sm: string, _sc: boolean, _sb: string, _so: string, cb: (d: NoteListResponse) => void) =>
+            cb({
+                list: [{ id: 1, action: "", path: "trash.md", pathHash: "h-t", ctime: 1, mtime: 1, updatedTimestamp: 1, updatedAt: "", createdAt: "", version: 1 }] as Note[],
+                pager: { page: 1, pageSize: 10, totalRows: 1 },
+            })
+        );
+    });
+
+    afterEach(() => {
+        useRealtimeStore.getState().reset();
+    });
+
+    it("refreshes share paths on shares bump and flat-file list on files bump", async () => {
+        render(<Harness initialViewMode="flat-file" />);
+
+        expect(await screen.findByText("a.png")).toBeInTheDocument();
+        expect(mocks.handleGetNoteSharePaths).toHaveBeenCalledTimes(1);
+        expect(mocks.handleFileList).toHaveBeenCalledTimes(1);
+
+        act(() => {
+            useRealtimeStore.getState().bump("shares");
+        });
+        await waitFor(() => {
+            expect(mocks.handleGetNoteSharePaths).toHaveBeenCalledTimes(2);
+        });
+        // Bumping shares does not refetch flat-file list unnecessarily
+        expect(mocks.handleFileList).toHaveBeenCalledTimes(1);
+
+        act(() => {
+            useRealtimeStore.getState().bump("files");
+        });
+        await waitFor(() => {
+            expect(mocks.handleFileList).toHaveBeenCalledTimes(2);
+        });
+    });
+
+    it("refreshes trash note list on trash bump when in recycle mode", async () => {
+        render(<Harness initialViewMode="flat" isRecycle={true} />);
+
+        expect(await screen.findByText("trash")).toBeInTheDocument();
+        expect(mocks.handleNoteList).toHaveBeenCalledTimes(1);
+
+        act(() => {
+            useRealtimeStore.getState().bump("trash");
+        });
+        await waitFor(() => {
+            expect(mocks.handleNoteList).toHaveBeenCalledTimes(2);
+        });
+    });
+});

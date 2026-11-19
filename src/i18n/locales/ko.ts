@@ -1036,4 +1036,12 @@ export default {
     "ui.unsaved.message": "저장되지 않은 변경 사항이 있습니다. 이 페이지를 떠나시겠습니까? 변경 사항은 손실됩니다.",
     "ui.unsaved.leave": "떠나기",
     "ui.unsaved.stay": "머물기",
+
+    // --- ui.realtime ---
+    "ui.realtime.remoteUpdatedConflict": "이 노트가 다른 기기에서 업데이트되었습니다. 최신 내용을 다시 불러오시겠습니까? (저장되지 않은 수정 사항은 덮어쓰지 않습니다)",
+    "ui.realtime.reloadRemote": "다시 불러오기",
+    "ui.realtime.keepCurrent": "현재 내용 유지",
+    "ui.realtime.remoteDeletedMessage": "이 노트가 다른 기기에서 삭제되었습니다. 다시 생성되는 것을 방지하기 위해 자동 저장이 일시 중지되었습니다.",
+    "ui.realtime.remoteDeletedToast": "열려 있는 파일이 다른 기기에서 삭제되었습니다",
+    "ui.realtime.backToList": "목록으로 돌아가기",
 };

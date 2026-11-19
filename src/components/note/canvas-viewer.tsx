@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { ArrowLeft, ZoomIn, ZoomOut, Maximize } from "lucide-react";
 import { useFileHandle } from "@/components/api-handle/file-handle";
 import { buildApiHeaders } from "@/lib/utils/api-headers";
+import { useRealtimeStore } from "@/stores/realtime-store";
 import { CanvasData, CanvasNode, Viewport } from "@/lib/types/canvas";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -81,6 +82,26 @@ export function CanvasViewer({
     const [containerSize, setContainerSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
     const wrapperRef = useRef<HTMLDivElement>(null);
     const contentRef = useRef<HTMLDivElement>(null);
+    const [reloadTick, setReloadTick] = useState(0);
+    const lastChangeSeq = useRealtimeStore(state => state.lastChangeSeq);
+    const lastChangeEvent = useRealtimeStore(state => state.lastChangeEvent);
+    const handledChangeSeqRef = useRef(lastChangeSeq);
+
+    useEffect(() => {
+        if (lastChangeSeq === handledChangeSeqRef.current) return;
+        handledChangeSeqRef.current = lastChangeSeq;
+
+        if (!note || isRecycle || !lastChangeEvent) return;
+        if (lastChangeEvent.vault && lastChangeEvent.vault !== vault) return;
+        if (lastChangeEvent.action !== "FileSyncUpdate" && lastChangeEvent.action !== "NoteSyncModify") return;
+
+        const matched = lastChangeEvent.pathHash && note.pathHash
+            ? lastChangeEvent.pathHash === note.pathHash
+            : lastChangeEvent.path === note.path;
+        if (matched) {
+            setReloadTick(t => t + 1);
+        }
+    }, [lastChangeSeq, lastChangeEvent, note, isRecycle, vault]);
 
     // Dynamically compute available height since parent chain has no fixed height
     useEffect(() => {
@@ -161,7 +182,7 @@ export function CanvasViewer({
             });
 
         return () => { cancelled = true; };
-    }, [vault, note, getRawFileUrl, isRecycle]);
+    }, [vault, note, getRawFileUrl, isRecycle, reloadTick]);
 
     // Fit to view when data loads or container resizes
     useEffect(() => {

@@ -1038,4 +1038,12 @@ export default {
     "ui.unsaved.message": "You have unsaved changes. Are you sure you want to leave this page? Changes will be lost.",
     "ui.unsaved.leave": "Leave",
     "ui.unsaved.stay": "Stay",
+
+    // --- ui.realtime ---
+    "ui.realtime.remoteUpdatedConflict": "This note was updated on another device. Reload the latest version? (Your unsaved edits will not be overwritten.)",
+    "ui.realtime.reloadRemote": "Reload",
+    "ui.realtime.keepCurrent": "Keep current",
+    "ui.realtime.remoteDeletedMessage": "This note was deleted on another device. Auto-save has been paused to prevent recreating it.",
+    "ui.realtime.remoteDeletedToast": "The open file was deleted on another device",
+    "ui.realtime.backToList": "Back to list",
 };

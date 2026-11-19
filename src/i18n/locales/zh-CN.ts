@@ -1038,4 +1038,12 @@ export default {
     "ui.unsaved.message": "您有未保存的更改。确定要离开此页面吗？更改将丢失。",
     "ui.unsaved.leave": "离开",
     "ui.unsaved.stay": "留下",
+
+    // --- ui.realtime ---
+    "ui.realtime.remoteUpdatedConflict": "该笔记已在其他设备更新，是否重新加载最新内容？（当前未保存的修改不会被覆盖）",
+    "ui.realtime.reloadRemote": "重新加载",
+    "ui.realtime.keepCurrent": "保留当前",
+    "ui.realtime.remoteDeletedMessage": "该笔记已在其他设备被删除，已暂停自动保存以免重新写入。",
+    "ui.realtime.remoteDeletedToast": "当前打开的文件已在其他设备被删除",
+    "ui.realtime.backToList": "返回列表",
 };

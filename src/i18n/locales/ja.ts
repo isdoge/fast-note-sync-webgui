@@ -1036,4 +1036,12 @@ export default {
     "ui.unsaved.message": "未保存の変更があります。このページを離れてよろしいですか？変更は失われます。",
     "ui.unsaved.leave": "離れる",
     "ui.unsaved.stay": "留まる",
+
+    // --- ui.realtime ---
+    "ui.realtime.remoteUpdatedConflict": "このノートは他の端末で更新されました。最新の内容を再読み込みしますか？（未保存の変更は上書きされません）",
+    "ui.realtime.reloadRemote": "再読み込み",
+    "ui.realtime.keepCurrent": "現在の内容を保持",
+    "ui.realtime.remoteDeletedMessage": "このノートは他の端末で削除されました。再作成を防ぐため自動保存を一時停止しました。",
+    "ui.realtime.remoteDeletedToast": "開いているファイルは他の端末で削除されました",
+    "ui.realtime.backToList": "一覧に戻る",
 };
