@@ -106,4 +106,90 @@ describe("FilePreview (#357)", () => {
 
         expect(await screen.findByText("ui.file.unsupportedPreview")).toBeInTheDocument();
     });
+
+    it("应识别 HTTP 200 业务错误 JSON 响应为加载失败而非文件内容", async () => {
+        const errorJson = JSON.stringify({ code: 20001, status: false, message: "Permission denied" });
+        const buffer = new TextEncoder().encode(errorJson).buffer;
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValue({
+                ok: true,
+                headers: new Headers({ "content-type": "application/json; charset=utf-8" }),
+                arrayBuffer: async () => buffer,
+            })
+        );
+
+        render(<FilePreview file={makeFile("scripts/app.py", 128)} url="/api/file?path=scripts/app.py" onClose={vi.fn()} />);
+
+        expect(await screen.findByText("ui.file.previewLoadError")).toBeInTheDocument();
+        expect(screen.queryByTestId("codemirror-readonly")).not.toBeInTheDocument();
+    });
+
+    it("应识别 .json 附件接口返回的 HTTP 200 业务错误 JSON 为加载失败", async () => {
+        const errorJson = JSON.stringify({ code: 20001, status: false, message: "File not found" });
+        const buffer = new TextEncoder().encode(errorJson).buffer;
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValue({
+                ok: true,
+                headers: new Headers({ "content-type": "application/json; charset=utf-8" }),
+                arrayBuffer: async () => buffer,
+            })
+        );
+
+        render(<FilePreview file={makeFile("config/data.json", 128)} url="/api/file?path=config/data.json" onClose={vi.fn()} />);
+
+        expect(await screen.findByText("ui.file.previewLoadError")).toBeInTheDocument();
+        expect(screen.queryByTestId("codemirror-readonly")).not.toBeInTheDocument();
+    });
+
+    it("带服务端附件响应头的 .json 文件即使包含 status/code 字段也应正常预览", async () => {
+        const jsonContent = JSON.stringify({ status: false, code: 404, note: "fixture payload" }, null, 2);
+        const buffer = new TextEncoder().encode(jsonContent).buffer;
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValue({
+                ok: true,
+                headers: new Headers({
+                    "content-type": "application/json",
+                    etag: "chash-1",
+                    "cache-control": "private, max-age=31536000, must-revalidate",
+                }),
+                arrayBuffer: async () => buffer,
+            })
+        );
+
+        render(<FilePreview file={makeFile("config/fixture.json", buffer.byteLength)} url="/api/file?path=config/fixture.json" onClose={vi.fn()} />);
+
+        const editor = await screen.findByTestId("codemirror-readonly");
+        expect(editor.textContent).toBe(jsonContent);
+    });
+
+    it("流式响应超过 2MB 上限时应取消读取并显示过大提示", async () => {
+        const cancelMock = vi.fn().mockResolvedValue(undefined);
+        const releaseLockMock = vi.fn();
+        const oversizedChunk = new Uint8Array(MAX_TEXT_PREVIEW_BYTES + 1).fill(0x61);
+        const readMock = vi.fn().mockResolvedValueOnce({ done: false, value: oversizedChunk });
+
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValue({
+                ok: true,
+                headers: new Headers({ etag: "chash-1" }),
+                body: {
+                    getReader: () => ({
+                        read: readMock,
+                        cancel: cancelMock,
+                        releaseLock: releaseLockMock,
+                    }),
+                },
+            })
+        );
+
+        render(<FilePreview file={makeFile("logs/stream.log", 128)} url="/api/file?path=logs/stream.log" onClose={vi.fn()} />);
+
+        expect(await screen.findByText("ui.file.textTooLarge")).toBeInTheDocument();
+        expect(cancelMock).toHaveBeenCalledTimes(1);
+        expect(releaseLockMock).toHaveBeenCalledTimes(1);
+    });
 });
