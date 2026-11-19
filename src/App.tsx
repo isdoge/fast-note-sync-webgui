@@ -7,6 +7,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { addCacheBuster } from "@/lib/utils/cache-buster";
 import { buildApiHeaders } from "@/lib/utils/api-headers";
 import { useUrlSync } from "@/hooks/use-url-sync";
+import { useRealtimeSync } from "@/hooks/use-realtime-sync";
 import { toast } from "@/components/common/Toast";
 import { useAppStore } from "@/stores/app-store";
 import { useTranslation } from "react-i18next";
@@ -55,6 +56,7 @@ function App() {
   }, [activeVault])
 
   useUrlSync(activeVault, setActiveVault)
+  useRealtimeSync({ enabled: isLoggedIn, vault: activeVault })
 
   const [vaultsLoaded, setVaultsLoaded] = useState(false)
   const [registerIsEnable, setRegisterIsEnable] = useState(true)

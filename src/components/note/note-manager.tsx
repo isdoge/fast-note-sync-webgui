@@ -21,6 +21,7 @@ import { CanvasViewer } from "./canvas-viewer";
 import { NoteList } from "./note-list";
 import { NoteTreeSidebar } from "./note-tree-sidebar";
 import { useAppStore } from "@/stores/app-store";
+import { useRealtimeStore } from "@/stores/realtime-store";
 import { TocProvider } from "@/components/context/toc-context";
 import { useMobile } from "@/hooks/use-mobile";
 
@@ -316,6 +317,60 @@ export function NoteManager({
         // 已有笔记保存时，不更新 selectedNote，保持编辑器状态
     };
 
+    const lastChangeSeq = useRealtimeStore(state => state.lastChangeSeq);
+    const lastChangeEvent = useRealtimeStore(state => state.lastChangeEvent);
+    const handledChangeSeqRef = useRef(lastChangeSeq);
+
+    const handleRemoteRename = useCallback((newPath: string, newPathHash: string) => {
+        setSelectedNote(prev => {
+            if (!prev) return prev;
+            return {
+                ...prev,
+                path: newPath,
+                pathHash: newPathHash,
+            };
+        });
+    }, []);
+
+    useEffect(() => {
+        if (lastChangeSeq === handledChangeSeqRef.current) return;
+        handledChangeSeqRef.current = lastChangeSeq;
+
+        if (!lastChangeEvent || isRecycle || !selectedNote) return;
+        if (lastChangeEvent.vault && lastChangeEvent.vault !== vault) return;
+
+        // Markdown notes are handled inside NoteEditor so unsaved edits are never lost on unmount
+        if (!selectedNote.path.endsWith(".canvas")) return;
+
+        const isDeleteAction =
+            lastChangeEvent.action === "NoteSyncDelete" || lastChangeEvent.action === "FileSyncDelete";
+        const isRenameAction =
+            lastChangeEvent.action === "NoteSyncRename" || lastChangeEvent.action === "FileSyncRename";
+
+        if (isDeleteAction) {
+            const matched = lastChangeEvent.pathHash
+                ? lastChangeEvent.pathHash === selectedNote.pathHash
+                : lastChangeEvent.path === selectedNote.path;
+            if (matched) {
+                toast.warning(t("ui.realtime.remoteDeletedToast", { defaultValue: "The open file was deleted on another device." }));
+                setSelectedNote(undefined);
+                setView("list");
+            }
+            return;
+        }
+
+        if (isRenameAction) {
+            const matched = lastChangeEvent.oldPathHash
+                ? lastChangeEvent.oldPathHash === selectedNote.pathHash
+                : lastChangeEvent.oldPath === selectedNote.path;
+            if (matched && lastChangeEvent.path) {
+                const nextPath = lastChangeEvent.path;
+                const nextPathHash = lastChangeEvent.pathHash || hashCode(nextPath);
+                setSelectedNote(prev => prev ? { ...prev, path: nextPath, pathHash: nextPathHash } : prev);
+            }
+        }
+    }, [lastChangeSeq, lastChangeEvent, isRecycle, selectedNote, vault, t]);
+
     const handleViewHistory = (note: Note) => {
         setSelectedNoteForHistory(note);
         setHistoryModalOpen(true);
@@ -460,6 +515,7 @@ export function NoteManager({
                                             onBack={handleWorkspaceBack}
                                             onNavigateToFolder={handleNavigateToFolder}
                                             onSaveSuccess={handleSaveSuccess}
+                                            onRemoteRename={handleRemoteRename}
                                             onViewHistory={() => selectedNote && handleViewHistory(selectedNote)}
                                             isMaximized={isMaximized}
                                             onToggleMaximize={onToggleMaximize}

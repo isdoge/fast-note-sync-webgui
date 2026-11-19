@@ -9,6 +9,7 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useAppStore } from "@/stores/app-store";
+import { useRealtimeStore } from "@/stores/realtime-store";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "react-i18next";
 import { VaultType } from "@/lib/types/vault";
@@ -333,6 +334,8 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
     const [folders, setFolders] = useState<Folder[]>([]);
     const noteRequestIdRef = useRef(0);
     const { trashType, setModule } = useAppStore();
+    const notesRevision = useRealtimeStore(state => state.revisions.notes);
+    const treeRevision = useRealtimeStore(state => state.revisions.tree);
     const [shareModalOpen, setShareModalOpen] = useState(false);
     const [selectedShareNote, setSelectedShareNote] = useState<Note | null>(null);
     // 仅存储有效分享的笔记路径集合，替代原来的完整 ShareItem 列表
@@ -501,12 +504,19 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
         }
     };
 
+    const coreRealtimeRevision = !isRecycle
+        ? (viewMode === "folder" || isMixedSearch ? notesRevision + treeRevision : viewMode === "flat" ? notesRevision : 0)
+        : 0;
+
+    useEffect(() => {
+        setSelectedPaths(new Set()); // 清空选中
+    }, [vault, page, pageSize, filePage, filePageSize, debouncedKeyword, filterType, isRecycle, searchMode, sortBy, sortOrder, viewMode, currentPath, currentPathHash, shareFilter, shareFilterActiveDep]);
+
     useEffect(() => {
         console.log("[NoteList] fetchNotes triggered:", { currentPath, currentPathHash });
         fetchNotes(page, pageSize, filePage, filePageSize, debouncedKeyword);
-        setSelectedPaths(new Set()); // 清空选中
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [vault, page, pageSize, filePage, filePageSize, debouncedKeyword, filterType, isRecycle, searchMode, sortBy, sortOrder, viewMode, currentPath, currentPathHash, shareFilter, shareFilterActiveDep]);
+    }, [vault, page, pageSize, filePage, filePageSize, debouncedKeyword, filterType, isRecycle, searchMode, sortBy, sortOrder, viewMode, currentPath, currentPathHash, shareFilter, shareFilterActiveDep, coreRealtimeRevision]);
 
     useEffect(() => {
         if (debouncedKeyword.trim() && !isRecycle) {

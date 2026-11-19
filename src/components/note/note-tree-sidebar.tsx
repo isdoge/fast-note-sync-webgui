@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { useFileHandle } from "@/components/api-handle/file-handle";
 import { useNoteHandle } from "@/components/api-handle/note-handle";
 import { cn } from "@/lib/utils";
+import { useRealtimeStore } from "@/stores/realtime-store";
 import type { File as FileDTO, FileListResponse } from "@/lib/types/file";
 import type { Folder as FolderDTO } from "@/lib/types/folder";
 import type { Note, NoteListResponse } from "@/lib/types/note";
@@ -75,8 +76,19 @@ export function NoteTreeSidebar({ vault, selectedPathHash, onSelectNote, onFolde
     const [searchResults, setSearchResults] = useState<TreeSearchResult[]>([]);
     const [searchLoading, setSearchLoading] = useState(false);
     const searchRequestIdRef = useRef(0);
+    const requestIdByKeyRef = useRef<Record<string, number>>({});
+    const expandedKeysRef = useRef<Set<string>>(expandedKeys);
+    const folderByKeyRef = useRef<Record<string, FolderDTO>>({});
+    const treeRevision = useRealtimeStore(state => state.revisions.tree);
+    const lastTreeRevisionRef = useRef(treeRevision);
+
+    useEffect(() => {
+        expandedKeysRef.current = expandedKeys;
+    }, [expandedKeys]);
 
     const loadChildren = useCallback((key: string, path: string, pathHash: string) => {
+        const requestId = (requestIdByKeyRef.current[key] || 0) + 1;
+        requestIdByKeyRef.current[key] = requestId;
         setLoadingKeys(prev => new Set(prev).add(key));
 
         Promise.all([
@@ -88,7 +100,12 @@ export function NoteTreeSidebar({ vault, selectedPathHash, onSelectNote, onFolde
                 handleFolderFiles(vault, path, pathHash, 1, TREE_PAGE_SIZE, "path", "asc", resolve)
             ),
         ]).then(([folders, notes, files]) => {
+            if (requestId !== requestIdByKeyRef.current[key]) return;
             const folderList = folders || [];
+            for (const folderItem of folderList) {
+                const folderKey = folderItem.pathHash || folderItem.path;
+                folderByKeyRef.current[folderKey] = folderItem;
+            }
             onFoldersLoaded?.(folderList);
             setChildrenByKey(prev => ({
                 ...prev,
@@ -99,6 +116,7 @@ export function NoteTreeSidebar({ vault, selectedPathHash, onSelectNote, onFolde
                 }),
             }));
         }).finally(() => {
+            if (requestId !== requestIdByKeyRef.current[key]) return;
             setLoadingKeys(prev => {
                 const next = new Set(prev);
                 next.delete(key);
@@ -108,6 +126,8 @@ export function NoteTreeSidebar({ vault, selectedPathHash, onSelectNote, onFolde
     }, [handleFolderFiles, handleFolderList, handleFolderNotes, onFoldersLoaded, vault]);
 
     useEffect(() => {
+        folderByKeyRef.current = {};
+        requestIdByKeyRef.current = {};
         setChildrenByKey({});
         setExpandedKeys(new Set([ROOT_KEY]));
         setLoadingKeys(new Set());
@@ -117,6 +137,22 @@ export function NoteTreeSidebar({ vault, selectedPathHash, onSelectNote, onFolde
         setSearchLoading(false);
         loadChildren(ROOT_KEY, ROOT_PATH, ROOT_PATH_HASH);
     }, [loadChildren, vault]);
+
+    useEffect(() => {
+        if (treeRevision === lastTreeRevisionRef.current) {
+            return;
+        }
+        lastTreeRevisionRef.current = treeRevision;
+
+        loadChildren(ROOT_KEY, ROOT_PATH, ROOT_PATH_HASH);
+        for (const key of expandedKeysRef.current) {
+            if (key === ROOT_KEY) continue;
+            const folderItem = folderByKeyRef.current[key];
+            if (folderItem) {
+                loadChildren(key, folderItem.path, folderItem.pathHash);
+            }
+        }
+    }, [treeRevision, loadChildren]);
 
     useEffect(() => {
         const timer = window.setTimeout(() => {
@@ -169,7 +205,7 @@ export function NoteTreeSidebar({ vault, selectedPathHash, onSelectNote, onFolde
                 setSearchLoading(false);
             }
         });
-    }, [debouncedSearchKeyword, handleFileList, handleNoteList, vault]);
+    }, [debouncedSearchKeyword, handleFileList, handleNoteList, vault, treeRevision]);
 
     const toggleFolder = useCallback((folder: FolderDTO) => {
         const key = folder.pathHash || folder.path;

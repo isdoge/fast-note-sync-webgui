@@ -1,4 +1,4 @@
-import { ArrowLeft, Folder, History, RefreshCcw, Check, X, Cloud, Fullscreen, Shrink, Eye, Pencil, Columns2, PanelLeftClose, ArrowLeftRight, Maximize, Minimize, Share2, Download, List } from "lucide-react";
+import { ArrowLeft, Folder, History, RefreshCcw, Check, X, Cloud, Fullscreen, Shrink, Eye, Pencil, Columns2, PanelLeftClose, ArrowLeftRight, Maximize, Minimize, Share2, Download, List, AlertTriangle } from "lucide-react";
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
 import { useNoteHandle } from "@/components/api-handle/note-handle";
 import { ShareModal } from "@/components/share/share-modal";
@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { useTranslation } from "react-i18next";
 import { Input } from "@/components/ui/input";
 import { hashCode } from "@/lib/utils/hash";
+import { shouldReloadRemote } from "@/lib/realtime/conflict";
+import { useRealtimeStore } from "@/stores/realtime-store";
 import { format } from "date-fns";
 
 import type { MarkdownEditorRef } from "./markdown-editor";
@@ -41,6 +43,7 @@ interface NoteEditorProps {
     onBack: () => void;
     onNavigateToFolder?: (folderPath: string) => void;
     onSaveSuccess: (path: string, pathHash: string) => void;
+    onRemoteRename?: (path: string, pathHash: string) => void;
     onViewHistory?: () => void;
     isMaximized?: boolean;
     onToggleMaximize?: () => void;
@@ -56,6 +59,7 @@ export function NoteEditor({
     onBack,
     onNavigateToFolder,
     onSaveSuccess,
+    onRemoteRename,
     onViewHistory,
     isMaximized = false,
     onToggleMaximize,
@@ -70,15 +74,30 @@ export function NoteEditor({
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const contentRef = useRef("");
+    const lastSyncedContentRef = useRef("");
     const pathRef = useRef("");
     const flushPendingSaveRef = useRef<() => void>(() => {});
     const loadRequestRef = useRef(0);
+    const savingRef = useRef(false);
+    const remoteDeletedRef = useRef(false);
+    const lastChangeSeq = useRealtimeStore(state => state.lastChangeSeq);
+    const lastChangeEvent = useRealtimeStore(state => state.lastChangeEvent);
+    const resyncSeq = useRealtimeStore(state => state.resyncSeq);
+    const handledChangeSeqRef = useRef(lastChangeSeq);
+    const handledResyncSeqRef = useRef(resyncSeq);
 
     const [path, setPath] = useState("");
     const [content, setContent] = useState("");
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [originalNote, setOriginalNote] = useState<NoteDetail | null>(null);
+    const originalNoteRef = useRef<NoteDetail | null>(null);
+    const [remoteDeleted, setRemoteDeleted] = useState(false);
+    const [remoteConflict, setRemoteConflict] = useState<{ contentHash?: string; ts?: number } | null>(null);
+
+    useEffect(() => {
+        originalNoteRef.current = originalNote;
+    }, [originalNote]);
     const [isEditingTitle, setIsEditingTitle] = useState(false);
     const [editingTitleValue, setEditingTitleValue] = useState("");
     const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
@@ -128,26 +147,34 @@ export function NoteEditor({
 
     // 执行保存操作
     const doSave = useCallback((currentPath: string, currentContent: string, silent: boolean = false) => {
-        if (!currentPath || isRecycle) return;
+        if (!currentPath || isRecycle || remoteDeletedRef.current) return;
 
         const fullPath = currentPath.endsWith(".md") ? currentPath : currentPath + ".md";
 
+        const pathHash = hashCode(fullPath);
+        const contentHash = hashCode(currentContent);
         const options: { pathHash?: string; contentHash?: string } = {
-            pathHash: hashCode(fullPath),
-            contentHash: hashCode(currentContent)
+            pathHash,
+            contentHash
         };
 
+        useRealtimeStore.getState().markSelfWrite(pathHash, contentHash, Date.now(), fullPath);
 
+        savingRef.current = true;
         setSaving(true);
         handleSaveNote(vault, fullPath, currentContent, options, () => {
+            savingRef.current = false;
             setSaving(false);
             setLastSavedAt(new Date());
+            lastSyncedContentRef.current = currentContent;
+            useRealtimeStore.getState().markSelfWrite(pathHash, contentHash, Date.now(), fullPath);
             // 保存成功后更新 originalNote 的 path，避免后续请求被误判为重命名
             if (originalNote && originalNote.path !== fullPath) {
-                setOriginalNote(prev => prev ? { ...prev, path: fullPath } : null);
+                setOriginalNote(prev => prev ? { ...prev, path: fullPath, pathHash } : null);
             }
             onSaveSuccess(fullPath, options.pathHash || "");
         }, () => {
+            savingRef.current = false;
             setSaving(false);
         }, silent);
     }, [vault, originalNote, handleSaveNote, onSaveSuccess, isRecycle]);
@@ -155,14 +182,50 @@ export function NoteEditor({
     // 记录上一次加载的笔记标识，用于判断是否需要重新加载
     const lastNoteKeyRef = useRef<string>("");
 
+    const reloadFromRemote = useCallback((overridePath?: string, overridePathHash?: string) => {
+        if (saveTimerRef.current) {
+            clearTimeout(saveTimerRef.current);
+            saveTimerRef.current = null;
+        }
+        remoteDeletedRef.current = false;
+        setRemoteDeleted(false);
+        setRemoteConflict(null);
+
+        const targetPath = overridePath || originalNote?.path || note?.path;
+        const targetPathHash = overridePathHash || originalNote?.pathHash || note?.pathHash;
+        if (!targetPath) return;
+
+        const requestId = ++loadRequestRef.current;
+        updatePath(targetPath.replace(/\.md$/, ""));
+        setLoading(true);
+        handleGetNote(vault, targetPath, targetPathHash, isRecycle, (data) => {
+            if (requestId !== loadRequestRef.current) return;
+            originalNoteRef.current = data;
+            setOriginalNote(data);
+            lastSyncedContentRef.current = data.content;
+            contentRef.current = data.content;
+            setContent(data.content);
+            editorRef.current?.setValue(data.content);
+        }, () => {
+            if (requestId !== loadRequestRef.current) return;
+            setLoading(false);
+        });
+    }, [note, originalNote, vault, handleGetNote, isRecycle, updatePath]);
+
     const loadNote = useCallback(() => {
         // 切换笔记前：先用旧 path flush 待保存内容，再清除定时器
         if (saveTimerRef.current) {
             clearTimeout(saveTimerRef.current);
             saveTimerRef.current = null;
-            const latestContent = editorRef.current?.getValue() ?? contentRef.current;
-            doSave(pathRef.current, latestContent, true);
+            if (!remoteDeletedRef.current) {
+                const latestContent = editorRef.current?.getValue() ?? contentRef.current;
+                doSave(pathRef.current, latestContent, true);
+            }
         }
+
+        remoteDeletedRef.current = false;
+        setRemoteDeleted(false);
+        setRemoteConflict(null);
 
         const requestId = ++loadRequestRef.current;
         if (note) {
@@ -171,25 +234,40 @@ export function NoteEditor({
             handleGetNote(vault, note.path, note.pathHash, isRecycle, (data) => {
                 // stale response 保护：丢弃过期请求的响应
                 if (requestId !== loadRequestRef.current) return;
+                originalNoteRef.current = data;
                 setOriginalNote(data);
+                lastSyncedContentRef.current = data.content;
+                contentRef.current = data.content;
                 setContent(data.content);
+                editorRef.current?.setValue(data.content);
             }, () => {
                 if (requestId !== loadRequestRef.current) return;
                 setLoading(false);
             });
         } else {
             updatePath(defaultFolderPath ? (defaultFolderPath + "/") : "");
+            lastSyncedContentRef.current = "";
+            contentRef.current = "";
             setContent("");
+            originalNoteRef.current = null;
             setOriginalNote(null);
             setLoading(false);
         }
     }, [note, vault, handleGetNote, isRecycle, updatePath, doSave, defaultFolderPath]);
 
-    // 当 note 关键信息变化时进行加载
+    // 当 note 关键信息变化时进行加载（若已通过远端重命名就地更新过则不重复加载）
     useEffect(() => {
         const currentKey = note ? `${note.id}-${note.pathHash}-${note.path}` : "new-note";
         if (currentKey !== lastNoteKeyRef.current) {
             lastNoteKeyRef.current = currentKey;
+            if (
+                note &&
+                originalNoteRef.current &&
+                originalNoteRef.current.pathHash === note.pathHash &&
+                originalNoteRef.current.path === note.path
+            ) {
+                return;
+            }
             loadNote();
         }
     }, [note, loadNote]);
@@ -267,6 +345,8 @@ export function NoteEditor({
         clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
 
+        if (remoteDeletedRef.current) return;
+
         const latestContent = editorRef.current?.getValue() ?? contentRef.current;
         doSave(pathRef.current, latestContent, true);
     }, [doSave]);
@@ -286,8 +366,8 @@ export function NoteEditor({
 
         // 新建笔记且没有标题时不自动保存
         if (isNewNote && !pathRef.current) return;
-        // 回收站模式不保存
-        if (isRecycle) return;
+        // 回收站模式或远端已删除时不保存
+        if (isRecycle || remoteDeletedRef.current) return;
 
         // 清除之前的定时器
         if (saveTimerRef.current) {
@@ -303,10 +383,100 @@ export function NoteEditor({
         }, AUTO_SAVE_DELAY);
     }, [isNewNote, isRecycle, doSave, viewLayout]);
 
+    // 处理实时事件：远端修改、重命名、删除
+    useEffect(() => {
+        if (lastChangeSeq === handledChangeSeqRef.current) return;
+        handledChangeSeqRef.current = lastChangeSeq;
+
+        if (!lastChangeEvent || isRecycle || !note) return;
+        if (lastChangeEvent.vault && lastChangeEvent.vault !== vault) return;
+
+        const activePath = originalNote?.path || note.path;
+        const activePathHash = originalNote?.pathHash || note.pathHash;
+        const currentEditorContent = editorRef.current?.getValue() ?? contentRef.current;
+        const hasPendingChanges =
+            saveTimerRef.current !== null ||
+            savingRef.current ||
+            currentEditorContent !== lastSyncedContentRef.current;
+
+        const decision = shouldReloadRemote(lastChangeEvent, {
+            notePath: activePath,
+            notePathHash: activePathHash,
+            currentContentHash: hashCode(currentEditorContent),
+            hasPendingChanges,
+            selfWrites: useRealtimeStore.getState().selfWrites,
+            now: Date.now(),
+        });
+
+        if (decision === "ignore") {
+            return;
+        }
+
+        if (decision === "deleted") {
+            if (saveTimerRef.current) {
+                clearTimeout(saveTimerRef.current);
+                saveTimerRef.current = null;
+            }
+            remoteDeletedRef.current = true;
+            setRemoteDeleted(true);
+            setRemoteConflict(null);
+            return;
+        }
+
+        if (decision === "renamed") {
+            const newFullPath = lastChangeEvent.path || activePath;
+            const newPathHash = lastChangeEvent.pathHash || hashCode(newFullPath);
+            updatePath(newFullPath.replace(/\.md$/, ""));
+            if (originalNoteRef.current) {
+                originalNoteRef.current = {
+                    ...originalNoteRef.current,
+                    path: newFullPath,
+                    pathHash: newPathHash,
+                };
+            }
+            setOriginalNote(prev => prev ? { ...prev, path: newFullPath, pathHash: newPathHash } : null);
+            onRemoteRename?.(newFullPath, newPathHash);
+            if (!hasPendingChanges && lastChangeEvent.contentHash && lastChangeEvent.contentHash !== hashCode(currentEditorContent)) {
+                reloadFromRemote(newFullPath, newPathHash);
+            }
+            return;
+        }
+
+        if (decision === "conflict") {
+            setRemoteConflict({
+                contentHash: lastChangeEvent.contentHash,
+                ts: lastChangeEvent.ts,
+            });
+            return;
+        }
+
+        if (decision === "reload") {
+            reloadFromRemote();
+        }
+    }, [lastChangeSeq, lastChangeEvent, isRecycle, note, originalNote, vault, updatePath, onRemoteRename, reloadFromRemote]);
+
+    // 处理 resync / 事件风暴整体失效：无本地未保存改动且不在加载中时静默重载
+    useEffect(() => {
+        if (resyncSeq === handledResyncSeqRef.current) return;
+        handledResyncSeqRef.current = resyncSeq;
+
+        if (isRecycle || !note || remoteDeletedRef.current || loading) return;
+
+        const currentEditorContent = editorRef.current?.getValue() ?? contentRef.current;
+        const hasPendingChanges =
+            saveTimerRef.current !== null ||
+            savingRef.current ||
+            currentEditorContent !== lastSyncedContentRef.current;
+
+        if (!hasPendingChanges) {
+            reloadFromRemote();
+        }
+    }, [resyncSeq, isRecycle, note, loading, reloadFromRemote]);
+
     // 标题编辑相关
     // Title editing logic
     const startEditingTitle = useCallback(() => {
-        if (isRecycle) return;
+        if (isRecycle || remoteDeletedRef.current) return;
         setEditingTitleValue(filename);
         setIsEditingTitle(true);
         setTimeout(() => titleInputRef.current?.focus(), 0);
@@ -352,6 +522,12 @@ export function NoteEditor({
             return;
         }
 
+        if (remoteDeletedRef.current) {
+            cancelEditingTitle();
+            return;
+        }
+
+        savingRef.current = true;
         setSaving(true);
         handleRenameNote({
             vault,
@@ -359,6 +535,7 @@ export function NoteEditor({
             path: newFullPath,
             oldPathHash: originalNote?.pathHash
         }, () => {
+            savingRef.current = false;
             setSaving(false);
             updatePath(targetPath);
             setIsEditingTitle(false);
@@ -719,6 +896,68 @@ export function NoteEditor({
                     </Tooltip>
                 </div>
             </div>
+
+            {/* 远端变更或删除提示横幅 */}
+            {remoteDeleted && (
+                <div
+                    role="alert"
+                    className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs sm:text-sm text-destructive"
+                >
+                    <div className="flex items-center gap-2 min-w-0">
+                        <AlertTriangle className="h-4 w-4 shrink-0" />
+                        <span>
+                            {t("ui.realtime.remoteDeletedMessage", {
+                                defaultValue: "This note was deleted on another device. Auto-save is paused to prevent recreating it.",
+                            })}
+                        </span>
+                    </div>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 rounded-lg border-destructive/40 text-destructive hover:bg-destructive/10"
+                        onClick={onBack}
+                    >
+                        {t("ui.realtime.backToList", { defaultValue: "Back to list" })}
+                    </Button>
+                </div>
+            )}
+
+            {!remoteDeleted && remoteConflict && (
+                <div
+                    role="status"
+                    className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs sm:text-sm text-amber-800 dark:text-amber-200"
+                >
+                    <div className="flex items-center gap-2 min-w-0">
+                        <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                        <span>
+                            {t("ui.realtime.remoteUpdatedConflict", {
+                                defaultValue: "This note was updated on another device. Reload or keep your current edits?",
+                            })}
+                        </span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                        <Button
+                            type="button"
+                            variant="default"
+                            size="sm"
+                            className="h-7 rounded-lg"
+                            onClick={() => reloadFromRemote()}
+                        >
+                            {t("ui.realtime.reloadRemote", { defaultValue: "Reload" })}
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 rounded-lg"
+                            onClick={() => setRemoteConflict(null)}
+                        >
+                            {t("ui.realtime.keepCurrent", { defaultValue: "Keep current" })}
+                        </Button>
+                    </div>
+                </div>
+            )}
 
             {/* 编辑器区域 */}
             <div className="flex-1 min-h-0">
