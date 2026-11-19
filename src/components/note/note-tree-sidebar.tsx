@@ -79,6 +79,7 @@ export function NoteTreeSidebar({ vault, selectedPathHash, onSelectNote, onFolde
     const requestIdByKeyRef = useRef<Record<string, number>>({});
     const expandedKeysRef = useRef<Set<string>>(expandedKeys);
     const folderByKeyRef = useRef<Record<string, FolderDTO>>({});
+    const folderChildrenKeysRef = useRef<Record<string, string[]>>({});
     const treeRevision = useRealtimeStore(state => state.revisions.tree);
     const notesRevision = useRealtimeStore(state => state.revisions.notes);
     const refreshRevision = treeRevision + notesRevision;
@@ -104,19 +105,58 @@ export function NoteTreeSidebar({ vault, selectedPathHash, onSelectNote, onFolde
         ]).then(([folders, notes, files]) => {
             if (requestId !== requestIdByKeyRef.current[key]) return;
             const folderList = folders || [];
+            const nextChildKeys = folderList.map(folderItem => folderItem.pathHash || folderItem.path);
+            const prevChildKeys = folderChildrenKeysRef.current[key] || [];
+            const nextChildKeySet = new Set(nextChildKeys);
+
+            const removedQueue = prevChildKeys.filter(childKey => !nextChildKeySet.has(childKey));
+            const staleKeys = new Set<string>();
+            while (removedQueue.length > 0) {
+                const staleKey = removedQueue.pop()!;
+                if (staleKeys.has(staleKey)) continue;
+                staleKeys.add(staleKey);
+                const nestedKeys = folderChildrenKeysRef.current[staleKey];
+                if (nestedKeys) {
+                    removedQueue.push(...nestedKeys);
+                }
+                delete folderByKeyRef.current[staleKey];
+                delete folderChildrenKeysRef.current[staleKey];
+                delete requestIdByKeyRef.current[staleKey];
+            }
+
+            folderChildrenKeysRef.current[key] = nextChildKeys;
             for (const folderItem of folderList) {
                 const folderKey = folderItem.pathHash || folderItem.path;
                 folderByKeyRef.current[folderKey] = folderItem;
             }
+            if (staleKeys.size > 0) {
+                const nextExpanded = new Set(expandedKeysRef.current);
+                let expandedChanged = false;
+                for (const staleKey of staleKeys) {
+                    if (nextExpanded.delete(staleKey)) {
+                        expandedChanged = true;
+                    }
+                }
+                if (expandedChanged) {
+                    expandedKeysRef.current = nextExpanded;
+                    setExpandedKeys(nextExpanded);
+                }
+            }
             onFoldersLoaded?.(folderList);
-            setChildrenByKey(prev => ({
-                ...prev,
-                [key]: sortChildren({
-                    folders: folderList,
-                    notes: notes?.list || [],
-                    canvasFiles: (files?.list || []).filter(file => file.path.toLowerCase().endsWith(".canvas")),
-                }),
-            }));
+            setChildrenByKey(prev => {
+                const next = {
+                    ...prev,
+                    [key]: sortChildren({
+                        folders: folderList,
+                        notes: notes?.list || [],
+                        canvasFiles: (files?.list || []).filter(file => file.path.toLowerCase().endsWith(".canvas")),
+                    }),
+                };
+                for (const staleKey of staleKeys) {
+                    delete next[staleKey];
+                }
+                return next;
+            });
         }).finally(() => {
             if (requestId !== requestIdByKeyRef.current[key]) return;
             setLoadingKeys(prev => {
@@ -129,6 +169,7 @@ export function NoteTreeSidebar({ vault, selectedPathHash, onSelectNote, onFolde
 
     useEffect(() => {
         folderByKeyRef.current = {};
+        folderChildrenKeysRef.current = {};
         requestIdByKeyRef.current = {};
         setChildrenByKey({});
         setExpandedKeys(new Set([ROOT_KEY]));
