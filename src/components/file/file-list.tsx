@@ -89,6 +89,12 @@ export function FileList({ vault, vaults, onVaultChange, isRecycle = false, page
         previewFileRef.current = previewFile;
     }, [previewFile]);
 
+    useEffect(() => {
+        previewFileRef.current = null;
+        setPreviewFile(null);
+        setPreviewUrl("");
+    }, [vault]);
+
     // Debounce search keyword
     useEffect(() => {
         const timer = setTimeout(() => {

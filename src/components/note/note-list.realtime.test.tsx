@@ -87,7 +87,7 @@ vi.mock("@/components/ui/dropdown-menu", () => ({
     DropdownMenuItem: ({ children }: { children: React.ReactNode }) => <button type="button">{children}</button>,
 }));
 
-function Harness({ initialViewMode = "flat-file", isRecycle = false }: { initialViewMode?: ViewModeType; isRecycle?: boolean }) {
+function Harness({ vault = "doge", initialViewMode = "flat-file", isRecycle = false }: { vault?: string; initialViewMode?: ViewModeType; isRecycle?: boolean }) {
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(10);
     const [searchKeyword, setSearchKeyword] = useState("");
@@ -99,7 +99,7 @@ function Harness({ initialViewMode = "flat-file", isRecycle = false }: { initial
 
     return (
         <NoteList
-            vault="doge"
+            vault={vault}
             onSelectNote={vi.fn()}
             onCreateNote={vi.fn()}
             page={page}
@@ -284,6 +284,18 @@ describe("NoteList realtime scopes (shares, files, trash)", () => {
 
         await waitFor(() => {
             expect(screen.getByTestId("file-preview-url")).toHaveAttribute("data-size", "64");
+        });
+    });
+
+    it("clears open preview when switching vault", async () => {
+        const { rerender } = render(<Harness vault="doge" initialViewMode="flat-file" />);
+
+        fireEvent.click(await screen.findByText("a.png"));
+        expect(await screen.findByTestId("file-preview-url")).toBeInTheDocument();
+
+        rerender(<Harness vault="other-vault" initialViewMode="flat-file" />);
+        await waitFor(() => {
+            expect(screen.queryByTestId("file-preview-url")).not.toBeInTheDocument();
         });
     });
 });

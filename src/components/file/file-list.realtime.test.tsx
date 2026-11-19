@@ -194,4 +194,30 @@ describe("FileList realtime preview", () => {
             expect(screen.getByTestId("file-preview-url")).toHaveAttribute("data-size", "128");
         });
     });
+
+    it("clears open preview when switching vault", async () => {
+        const props = {
+            page: 1,
+            setPage: vi.fn(),
+            pageSize: 10,
+            setPageSize: vi.fn(),
+            searchKeyword: "",
+            setSearchKeyword: vi.fn(),
+            currentPath: "",
+            setCurrentPath: vi.fn(),
+            currentPathHash: "",
+            setCurrentPathHash: vi.fn(),
+            pathHashMap: {},
+            setPathHashMap: vi.fn(),
+        };
+        const { rerender } = render(<FileList vault="doge" {...props} />);
+
+        fireEvent.click(await screen.findByText("img.png"));
+        expect(await screen.findByTestId("file-preview-url")).toBeInTheDocument();
+
+        rerender(<FileList vault="other-vault" {...props} />);
+        await waitFor(() => {
+            expect(screen.queryByTestId("file-preview-url")).not.toBeInTheDocument();
+        });
+    });
 });

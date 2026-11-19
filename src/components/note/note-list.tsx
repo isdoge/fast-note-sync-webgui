@@ -344,6 +344,12 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
     useEffect(() => {
         previewFileRef.current = previewFile;
     }, [previewFile]);
+
+    useEffect(() => {
+        previewFileRef.current = null;
+        setPreviewFile(null);
+        setPreviewUrl("");
+    }, [vault]);
     const [shareModalOpen, setShareModalOpen] = useState(false);
     const [selectedShareNote, setSelectedShareNote] = useState<Note | null>(null);
     // 仅存储有效分享的笔记路径集合，替代原来的完整 ShareItem 列表
