@@ -56,6 +56,11 @@ describe("realtime-store", () => {
     });
 
     it("ignores events belonging to other vaults", () => {
+        const received: string[] = [];
+        const unsubscribe = subscribeChangeEvents((event) => {
+            received.push(event.path);
+        });
+
         useRealtimeStore.getState().ingestFrame(
             { type: "change", data: makeChange("NoteSyncModify", { vault: "other" }) },
             "doge",
@@ -64,7 +69,8 @@ describe("realtime-store", () => {
         vi.advanceTimersByTime(COALESCE_WINDOW_MS + 50);
 
         expect(useRealtimeStore.getState().revisions.notes).toBe(0);
-        expect(useRealtimeStore.getState().lastChangeSeq).toBe(0);
+        expect(received).toEqual([]);
+        unsubscribe();
     });
 
     it("bumps all scopes on hello and resync", () => {
@@ -179,11 +185,9 @@ describe("realtime-store", () => {
             "vaultA",
             1000
         );
-        expect(useRealtimeStore.getState().lastChangeEvent?.path).toBe("old.md");
 
-        // 切换笔记库清空旧库事件槽位，新订阅方不会收到旧事件，且旧库迟到事件被拦截
+        // 切换笔记库后，新订阅方不会收到旧事件，且旧库迟到事件被拦截
         store.setActiveVault("vaultB");
-        expect(useRealtimeStore.getState().lastChangeEvent).toBeNull();
 
         const receivedAfterSwitch: string[] = [];
         const unsubAfterSwitch = subscribeChangeEvents((event) => {
@@ -197,7 +201,7 @@ describe("realtime-store", () => {
         );
         expect(receivedAfterSwitch).toEqual([]);
 
-        // reset() 后同样不重放旧事件
+        // reset() 后同样不重放旧事件，且 seq 从 1 重新计数
         store.ingestFrame(
             { type: "change", data: makeChange("NoteSyncModify", { vault: "vaultB", path: "in-b.md" }) },
             "vaultB",
@@ -207,14 +211,19 @@ describe("realtime-store", () => {
         unsubAfterSwitch();
 
         store.reset();
-        expect(useRealtimeStore.getState().lastChangeEvent).toBeNull();
-        expect(useRealtimeStore.getState().lastChangeSeq).toBe(0);
 
-        const receivedAfterReset: string[] = [];
-        const unsubAfterReset = subscribeChangeEvents((event) => {
-            receivedAfterReset.push(event.path);
+        const receivedAfterReset: Array<{ path: string; seq: number }> = [];
+        const unsubAfterReset = subscribeChangeEvents((event, seq) => {
+            receivedAfterReset.push({ path: event.path, seq });
         });
         expect(receivedAfterReset).toEqual([]);
+
+        store.ingestFrame(
+            { type: "change", data: makeChange("NoteSyncModify", { vault: "vaultB", path: "fresh.md" }) },
+            "vaultB",
+            1030
+        );
+        expect(receivedAfterReset).toEqual([{ path: "fresh.md", seq: 1 }]);
         unsubAfterReset();
     });
 });

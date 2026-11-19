@@ -97,6 +97,7 @@ function clearCoalescer() {
 export type ChangeEventListener = (event: RealtimeChangeEvent, seq: number) => void;
 
 const changeListeners = new Set<ChangeEventListener>();
+let changeSeq = 0;
 
 /**
  * 订阅通过校验的实时变更事件（按到达顺序同步回调，不经 React 批处理槽位覆盖）。
@@ -112,8 +113,6 @@ export interface RealtimeState {
     status: RealtimeConnectionStatus;
     activeVault: string | null;
     revisions: RealtimeRevisions;
-    lastChangeEvent: RealtimeChangeEvent | null;
-    lastChangeSeq: number;
     resyncSeq: number;
     selfWrites: SelfWriteRecord[];
 
@@ -194,8 +193,6 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => {
         status: "idle",
         activeVault: null,
         revisions: createInitialRevisions(),
-        lastChangeEvent: null,
-        lastChangeSeq: 0,
         resyncSeq: 0,
         selfWrites: [],
 
@@ -203,11 +200,7 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => {
 
         setActiveVault: (vault) => {
             clearCoalescer();
-            set((state) => (
-                state.activeVault === vault
-                    ? { activeVault: vault }
-                    : { activeVault: vault, lastChangeEvent: null }
-            ));
+            set({ activeVault: vault });
         },
 
         bump: (scopes) => {
@@ -267,14 +260,7 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => {
                 return;
             }
 
-            let nextSeq = 0;
-            set((state) => {
-                nextSeq = state.lastChangeSeq + 1;
-                return {
-                    lastChangeEvent: event,
-                    lastChangeSeq: nextSeq,
-                };
-            });
+            const nextSeq = ++changeSeq;
 
             for (const listener of Array.from(changeListeners)) {
                 if (changeListeners.has(listener)) {
@@ -288,12 +274,11 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => {
 
         reset: () => {
             clearCoalescer();
+            changeSeq = 0;
             set({
                 status: "idle",
                 activeVault: null,
                 revisions: createInitialRevisions(),
-                lastChangeEvent: null,
-                lastChangeSeq: 0,
                 resyncSeq: 0,
                 selfWrites: [],
             });

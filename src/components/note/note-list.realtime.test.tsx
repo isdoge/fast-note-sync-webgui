@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NoteList, type ShareFilterType, type ViewModeType } from "./note-list";
@@ -70,7 +70,9 @@ vi.mock("@/components/share/share-modal", () => ({
 }));
 
 vi.mock("@/components/file/file-preview", () => ({
-    FilePreview: () => null,
+    FilePreview: ({ file, url }: { file: FileDTO; url: string }) => (
+        <div data-testid="file-preview-url" data-path={file.path} data-url={url} />
+    ),
 }));
 
 vi.mock("@/components/ui/tooltip", () => ({
@@ -186,6 +188,67 @@ describe("NoteList realtime scopes (shares, files, trash)", () => {
         });
         await waitFor(() => {
             expect(mocks.handleNoteList).toHaveBeenCalledTimes(2);
+        });
+    });
+
+    it("refreshes attachment preview when matching FileSyncUpdate is followed synchronously by another event", async () => {
+        render(<Harness initialViewMode="flat-file" />);
+
+        const fileItem = await screen.findByText("a.png");
+        fireEvent.click(fileItem);
+
+        const previewEl = await screen.findByTestId("file-preview-url");
+        const initialUrl = previewEl.getAttribute("data-url");
+        expect(initialUrl).toBe("/api/file?vault=doge&path=a.png");
+
+        act(() => {
+            const store = useRealtimeStore.getState();
+            store.ingestFrame(
+                {
+                    type: "change",
+                    data: {
+                        v: 1,
+                        vault: "doge",
+                        action: "FileSyncUpdate",
+                        path: "a.png",
+                        pathHash: "h-a",
+                        oldPath: "",
+                        oldPathHash: "",
+                        contentHash: "c-a-2",
+                        ctime: 0,
+                        mtime: 0,
+                        updatedTimestamp: 0,
+                        ts: 2000,
+                    },
+                },
+                "doge"
+            );
+            store.ingestFrame(
+                {
+                    type: "change",
+                    data: {
+                        v: 1,
+                        vault: "doge",
+                        action: "NoteSyncModify",
+                        path: "docs/other.md",
+                        pathHash: "h-other",
+                        oldPath: "",
+                        oldPathHash: "",
+                        contentHash: "c-other",
+                        ctime: 0,
+                        mtime: 0,
+                        updatedTimestamp: 0,
+                        ts: 2001,
+                    },
+                },
+                "doge"
+            );
+        });
+
+        await waitFor(() => {
+            const nextUrl = screen.getByTestId("file-preview-url").getAttribute("data-url");
+            expect(nextUrl).not.toBe(initialUrl);
+            expect(nextUrl).toContain("_=");
         });
     });
 });

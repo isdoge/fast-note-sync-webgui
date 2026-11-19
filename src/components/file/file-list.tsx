@@ -7,7 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { File as FileDTO } from "@/lib/types/file";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useAppStore } from "@/stores/app-store";
-import { useRealtimeStore } from "@/stores/realtime-store";
+import { subscribeChangeEvents, useRealtimeStore } from "@/stores/realtime-store";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "react-i18next";
 import { VaultType } from "@/lib/types/vault";
@@ -80,13 +80,14 @@ export function FileList({ vault, vaults, onVaultChange, isRecycle = false, page
     const filesRevision = useRealtimeStore(state => state.revisions.files);
     const treeRevision = useRealtimeStore(state => state.revisions.tree);
     const trashRevision = useRealtimeStore(state => state.revisions.trash);
-    const lastChangeSeq = useRealtimeStore(state => state.lastChangeSeq);
-    const lastChangeEvent = useRealtimeStore(state => state.lastChangeEvent);
-    const handledPreviewChangeSeqRef = useRef(lastChangeSeq);
 
     // 预览相关状态
     const [previewFile, setPreviewFile] = useState<FileDTO | null>(null);
     const [previewUrl, setPreviewUrl] = useState<string>("");
+    const previewFileRef = useRef(previewFile);
+    useEffect(() => {
+        previewFileRef.current = previewFile;
+    }, [previewFile]);
 
     // Debounce search keyword
     useEffect(() => {
@@ -142,56 +143,58 @@ export function FileList({ vault, vaults, onVaultChange, isRecycle = false, page
 
     // 实时同步：当前正在预览的附件发生更新/重命名/删除时联动刷新
     useEffect(() => {
-        if (lastChangeSeq === handledPreviewChangeSeqRef.current) return;
-        handledPreviewChangeSeqRef.current = lastChangeSeq;
+        return subscribeChangeEvents((event, seq) => {
+            const currentPreview = previewFileRef.current;
+            if (!currentPreview) return;
+            if (event.vault && event.vault !== vault) return;
 
-        if (!previewFile || !lastChangeEvent) return;
-        if (lastChangeEvent.vault && lastChangeEvent.vault !== vault) return;
-
-        if (lastChangeEvent.action === "FileSyncUpdate") {
-            const matched = lastChangeEvent.pathHash
-                ? lastChangeEvent.pathHash === previewFile.pathHash
-                : lastChangeEvent.path === previewFile.path;
-            if (matched) {
-                let url = getRawFileUrl(vault, previewFile.path, previewFile.pathHash?.toString());
-                if (isRecycle) {
-                    url += (url.includes("?") ? "&" : "?") + "isRecycle=1";
+            if (event.action === "FileSyncUpdate") {
+                const matched = event.pathHash
+                    ? event.pathHash === currentPreview.pathHash
+                    : event.path === currentPreview.path;
+                if (matched) {
+                    let url = getRawFileUrl(vault, currentPreview.path, currentPreview.pathHash?.toString());
+                    if (isRecycle) {
+                        url += (url.includes("?") ? "&" : "?") + "isRecycle=1";
+                    }
+                    const sep = url.includes("?") ? "&" : "?";
+                    setPreviewUrl(`${url}${sep}_=${Date.now()}_${seq}`);
                 }
-                const sep = url.includes("?") ? "&" : "?";
-                setPreviewUrl(`${url}${sep}_=${Date.now()}_${lastChangeSeq}`);
+                return;
             }
-            return;
-        }
 
-        if (lastChangeEvent.action === "FileSyncDelete" && !isRecycle) {
-            const matched = lastChangeEvent.pathHash
-                ? lastChangeEvent.pathHash === previewFile.pathHash
-                : lastChangeEvent.path === previewFile.path;
-            if (matched) {
-                setPreviewFile(null);
-                setPreviewUrl("");
-            }
-            return;
-        }
-
-        if (lastChangeEvent.action === "FileSyncRename") {
-            const matched = lastChangeEvent.oldPathHash
-                ? lastChangeEvent.oldPathHash === previewFile.pathHash
-                : lastChangeEvent.oldPath === previewFile.path;
-            if (matched && lastChangeEvent.path) {
-                const nextPath = lastChangeEvent.path;
-                const nextPathHash = lastChangeEvent.pathHash || previewFile.pathHash;
-                const updatedFile = { ...previewFile, path: nextPath, pathHash: nextPathHash };
-                let url = getRawFileUrl(vault, nextPath, nextPathHash?.toString());
-                if (isRecycle) {
-                    url += (url.includes("?") ? "&" : "?") + "isRecycle=1";
+            if (event.action === "FileSyncDelete" && !isRecycle) {
+                const matched = event.pathHash
+                    ? event.pathHash === currentPreview.pathHash
+                    : event.path === currentPreview.path;
+                if (matched) {
+                    previewFileRef.current = null;
+                    setPreviewFile(null);
+                    setPreviewUrl("");
                 }
-                const sep = url.includes("?") ? "&" : "?";
-                setPreviewFile(updatedFile);
-                setPreviewUrl(`${url}${sep}_=${Date.now()}_${lastChangeSeq}`);
+                return;
             }
-        }
-    }, [lastChangeSeq, lastChangeEvent, previewFile, vault, isRecycle, getRawFileUrl]);
+
+            if (event.action === "FileSyncRename") {
+                const matched = event.oldPathHash
+                    ? event.oldPathHash === currentPreview.pathHash
+                    : event.oldPath === currentPreview.path;
+                if (matched && event.path) {
+                    const nextPath = event.path;
+                    const nextPathHash = event.pathHash || currentPreview.pathHash;
+                    const updatedFile = { ...currentPreview, path: nextPath, pathHash: nextPathHash };
+                    let url = getRawFileUrl(vault, nextPath, nextPathHash?.toString());
+                    if (isRecycle) {
+                        url += (url.includes("?") ? "&" : "?") + "isRecycle=1";
+                    }
+                    const sep = url.includes("?") ? "&" : "?";
+                    previewFileRef.current = updatedFile;
+                    setPreviewFile(updatedFile);
+                    setPreviewUrl(`${url}${sep}_=${Date.now()}_${seq}`);
+                }
+            }
+        });
+    }, [vault, isRecycle, getRawFileUrl]);
 
     // 当搜索内容、目录路径或浏览模式变化时，重置页码到第1页
     useEffect(() => {
