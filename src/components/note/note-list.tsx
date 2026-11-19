@@ -393,6 +393,41 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
     const isMixedSearch = !isRecycle && shareFilter !== "active" && Boolean(trimmedKeyword) && filterType === "all";
     const isMergedView = !isRecycle && shareFilter !== "active" && (isMixedSearch || viewMode === "folder");
 
+    const syncOpenPreviewFromList = (nextFiles: FileDTO[]) => {
+        const currentPreview = previewFileRef.current;
+        if (!currentPreview || nextFiles.length === 0) return;
+
+        const latest = nextFiles.find(item =>
+            currentPreview.pathHash && item.pathHash
+                ? item.pathHash === currentPreview.pathHash
+                : item.path === currentPreview.path
+        );
+        if (!latest) return;
+
+        const metaChanged =
+            latest.size !== currentPreview.size ||
+            latest.contentHash !== currentPreview.contentHash ||
+            latest.mtime !== currentPreview.mtime ||
+            latest.lastTime !== currentPreview.lastTime;
+        if (!metaChanged) return;
+
+        const versionChanged =
+            latest.contentHash !== currentPreview.contentHash ||
+            latest.mtime !== currentPreview.mtime;
+
+        previewFileRef.current = latest;
+        setPreviewFile(latest);
+
+        if (versionChanged) {
+            let url = getRawFileUrl(vault, latest.path, latest.pathHash?.toString(), latest.contentHash || latest.mtime);
+            if (isRecycle) {
+                url += (url.includes("?") ? "&" : "?") + "isRecycle=1";
+            }
+            const sep = url.includes("?") ? "&" : "?";
+            setPreviewUrl(`${url}${sep}_=${Date.now()}`);
+        }
+    };
+
     const fetchNotes = (
         currentPage: number = page,
         currentPageSize: number = pageSize,
@@ -455,6 +490,7 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
                 const filesList = fileData?.list || [];
                 setNotes(notesList);
                 setFiles(filesList);
+                syncOpenPreviewFromList(filesList);
                 setTotalRows(notesList.length);
                 setFilesTotalRows(filesList.length);
                 setLoading(false);
@@ -469,7 +505,9 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
             setFileLoading(true);
             handleFileList(vault, currentFilePage, currentFilePageSize, isRecycle, keyword, sortBy, sortOrder, (data) => {
                 if (requestId !== noteRequestIdRef.current) return;
-                setFiles(data?.list || []);
+                const filesList = data?.list || [];
+                setFiles(filesList);
+                syncOpenPreviewFromList(filesList);
                 setFilesTotalRows(data?.pager?.totalRows || 0);
                 setFileLoading(false);
                 setLoading(false);
@@ -496,6 +534,7 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
                 const filesList = fileData?.list || [];
                 setNotes(notesList);
                 setFiles(filesList);
+                syncOpenPreviewFromList(filesList);
                 setTotalRows(notesList.length);
                 setFilesTotalRows(filesList.length);
                 setLoading(false);
@@ -544,11 +583,24 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
                     ? event.pathHash === currentPreview.pathHash
                     : event.path === currentPreview.path;
                 if (matched) {
-                    let url = getRawFileUrl(vault, currentPreview.path, currentPreview.pathHash?.toString());
+                    const updatedPreview: FileDTO = {
+                        ...currentPreview,
+                        contentHash: event.contentHash || currentPreview.contentHash,
+                        mtime: event.mtime || currentPreview.mtime,
+                        ctime: event.ctime || currentPreview.ctime,
+                    };
+                    let url = getRawFileUrl(
+                        vault,
+                        updatedPreview.path,
+                        updatedPreview.pathHash?.toString(),
+                        updatedPreview.contentHash || updatedPreview.mtime
+                    );
                     if (isRecycle) {
                         url += (url.includes("?") ? "&" : "?") + "isRecycle=1";
                     }
                     const sep = url.includes("?") ? "&" : "?";
+                    previewFileRef.current = updatedPreview;
+                    setPreviewFile(updatedPreview);
                     setPreviewUrl(`${url}${sep}_=${Date.now()}_${seq}`);
                 }
                 return;
@@ -573,8 +625,14 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
                 if (matched && event.path) {
                     const nextPath = event.path;
                     const nextPathHash = event.pathHash || currentPreview.pathHash;
-                    const updatedFile = { ...currentPreview, path: nextPath, pathHash: nextPathHash };
-                    let url = getRawFileUrl(vault, nextPath, nextPathHash?.toString());
+                    const updatedFile: FileDTO = {
+                        ...currentPreview,
+                        path: nextPath,
+                        pathHash: nextPathHash,
+                        contentHash: event.contentHash || currentPreview.contentHash,
+                        mtime: event.mtime || currentPreview.mtime,
+                    };
+                    let url = getRawFileUrl(vault, nextPath, nextPathHash?.toString(), updatedFile.contentHash || updatedFile.mtime);
                     if (isRecycle) {
                         url += (url.includes("?") ? "&" : "?") + "isRecycle=1";
                     }
@@ -911,7 +969,7 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
      * 处理附件点击 (预览或下载) / Handle attachment click (preview or download)
      */
     const handleFileClick = (file: FileDTO) => {
-        let url = getRawFileUrl(vault, file.path, file.pathHash?.toString());
+        let url = getRawFileUrl(vault, file.path, file.pathHash?.toString(), file.contentHash || file.mtime);
         if (isRecycle) {
             url += (url.includes("?") ? "&" : "?") + "isRecycle=1";
         }

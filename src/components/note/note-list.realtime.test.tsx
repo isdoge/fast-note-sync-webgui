@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
     handleFileList: vi.fn(),
     handleGetNoteSharePaths: vi.fn(),
     handleNoteListByPaths: vi.fn(),
+    getRawFileUrl: vi.fn((v: string, p: string) => `/api/file?vault=${v}&path=${p}`),
 }));
 
 vi.mock("react-i18next", () => ({
@@ -42,7 +43,7 @@ vi.mock("@/components/api-handle/file-handle", () => ({
     useFileHandle: () => ({
         handleFileList: mocks.handleFileList,
         handleDeleteFile: vi.fn(),
-        getRawFileUrl: vi.fn((v: string, p: string) => `/api/file?vault=${v}&path=${p}`),
+        getRawFileUrl: mocks.getRawFileUrl,
         handleFolderFiles: mocks.handleFolderFiles,
         handleRenameFile: vi.fn(),
         handleFileUpload: vi.fn(),
@@ -71,7 +72,7 @@ vi.mock("@/components/share/share-modal", () => ({
 
 vi.mock("@/components/file/file-preview", () => ({
     FilePreview: ({ file, url }: { file: FileDTO; url: string }) => (
-        <div data-testid="file-preview-url" data-path={file.path} data-url={url} />
+        <div data-testid="file-preview-url" data-path={file.path} data-url={url} data-size={String(file.size)} />
     ),
 }));
 
@@ -249,6 +250,40 @@ describe("NoteList realtime scopes (shares, files, trash)", () => {
             const nextUrl = screen.getByTestId("file-preview-url").getAttribute("data-url");
             expect(nextUrl).not.toBe(initialUrl);
             expect(nextUrl).toContain("_=");
+        });
+    });
+
+    it("passes version arg to getRawFileUrl and syncs previewFile.size when NoteList refreshes", async () => {
+        let currentFile: FileDTO = {
+            path: "big.log",
+            pathHash: "h-big",
+            contentHash: "",
+            size: 3 * 1024 * 1024,
+            ctime: 1,
+            mtime: 100,
+            lastTime: 100,
+        };
+        mocks.handleFileList.mockImplementation((_v: string, _pg: number, _ps: number, _r: boolean, _kw: string, _sb: string, _so: string, cb: (d: FileListResponse) => void) =>
+            cb({
+                list: [currentFile],
+                pager: { page: 1, pageSize: 10, totalRows: 1, totalPages: 1 },
+            })
+        );
+
+        render(<Harness initialViewMode="flat-file" />);
+
+        fireEvent.click(await screen.findByText("big.log"));
+        // Falls back to mtime when contentHash is empty
+        expect(mocks.getRawFileUrl).toHaveBeenCalledWith("doge", "big.log", "h-big", 100);
+        expect(await screen.findByTestId("file-preview-url")).toHaveAttribute("data-size", String(3 * 1024 * 1024));
+
+        currentFile = { ...currentFile, size: 64, contentHash: "c-small-2", mtime: 200 };
+        act(() => {
+            useRealtimeStore.getState().bump("files");
+        });
+
+        await waitFor(() => {
+            expect(screen.getByTestId("file-preview-url")).toHaveAttribute("data-size", "64");
         });
     });
 });
