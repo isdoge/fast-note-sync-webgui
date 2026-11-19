@@ -21,7 +21,7 @@ import { CanvasViewer } from "./canvas-viewer";
 import { NoteList } from "./note-list";
 import { NoteTreeSidebar } from "./note-tree-sidebar";
 import { useAppStore } from "@/stores/app-store";
-import { useRealtimeStore } from "@/stores/realtime-store";
+import { subscribeChangeEvents } from "@/stores/realtime-store";
 import { TocProvider } from "@/components/context/toc-context";
 import { useMobile } from "@/hooks/use-mobile";
 
@@ -317,9 +317,10 @@ export function NoteManager({
         // 已有笔记保存时，不更新 selectedNote，保持编辑器状态
     };
 
-    const lastChangeSeq = useRealtimeStore(state => state.lastChangeSeq);
-    const lastChangeEvent = useRealtimeStore(state => state.lastChangeEvent);
-    const handledChangeSeqRef = useRef(lastChangeSeq);
+    const selectedNoteRef = useRef(selectedNote);
+    useEffect(() => {
+        selectedNoteRef.current = selectedNote;
+    }, [selectedNote]);
 
     const handleRemoteRename = useCallback((newPath: string, newPathHash: string) => {
         setSelectedNote(prev => {
@@ -333,43 +334,48 @@ export function NoteManager({
     }, []);
 
     useEffect(() => {
-        if (lastChangeSeq === handledChangeSeqRef.current) return;
-        handledChangeSeqRef.current = lastChangeSeq;
-
-        if (!lastChangeEvent || isRecycle || !selectedNote) return;
-        if (lastChangeEvent.vault && lastChangeEvent.vault !== vault) return;
+        if (isRecycle || !selectedNote) return;
 
         // Markdown notes are handled inside NoteEditor so unsaved edits are never lost on unmount
         if (!selectedNote.path.endsWith(".canvas")) return;
 
-        const isDeleteAction =
-            lastChangeEvent.action === "NoteSyncDelete" || lastChangeEvent.action === "FileSyncDelete";
-        const isRenameAction =
-            lastChangeEvent.action === "NoteSyncRename" || lastChangeEvent.action === "FileSyncRename";
+        return subscribeChangeEvents((event) => {
+            const currentNote = selectedNoteRef.current;
+            if (!currentNote || !currentNote.path.endsWith(".canvas")) return;
+            if (event.vault && event.vault !== vault) return;
 
-        if (isDeleteAction) {
-            const matched = lastChangeEvent.pathHash
-                ? lastChangeEvent.pathHash === selectedNote.pathHash
-                : lastChangeEvent.path === selectedNote.path;
-            if (matched) {
-                toast.warning(t("ui.realtime.remoteDeletedToast", { defaultValue: "The open file was deleted on another device." }));
-                setSelectedNote(undefined);
-                setView("list");
-            }
-            return;
-        }
+            const isDeleteAction =
+                event.action === "NoteSyncDelete" || event.action === "FileSyncDelete";
+            const isRenameAction =
+                event.action === "NoteSyncRename" || event.action === "FileSyncRename";
 
-        if (isRenameAction) {
-            const matched = lastChangeEvent.oldPathHash
-                ? lastChangeEvent.oldPathHash === selectedNote.pathHash
-                : lastChangeEvent.oldPath === selectedNote.path;
-            if (matched && lastChangeEvent.path) {
-                const nextPath = lastChangeEvent.path;
-                const nextPathHash = lastChangeEvent.pathHash || hashCode(nextPath);
-                setSelectedNote(prev => prev ? { ...prev, path: nextPath, pathHash: nextPathHash } : prev);
+            if (isDeleteAction) {
+                const matched = event.pathHash
+                    ? event.pathHash === currentNote.pathHash
+                    : event.path === currentNote.path;
+                if (matched) {
+                    selectedNoteRef.current = undefined;
+                    toast.warning(t("ui.realtime.remoteDeletedToast", { defaultValue: "The open file was deleted on another device." }));
+                    setSelectedNote(undefined);
+                    setView("list");
+                }
+                return;
             }
-        }
-    }, [lastChangeSeq, lastChangeEvent, isRecycle, selectedNote, vault, t]);
+
+            if (isRenameAction) {
+                const matched = event.oldPathHash
+                    ? event.oldPathHash === currentNote.pathHash
+                    : event.oldPath === currentNote.path;
+                if (matched && event.path) {
+                    const nextPath = event.path;
+                    const nextPathHash = event.pathHash || hashCode(nextPath);
+                    const nextNote = { ...currentNote, path: nextPath, pathHash: nextPathHash };
+                    selectedNoteRef.current = nextNote;
+                    setSelectedNote(nextNote);
+                }
+            }
+        });
+    }, [isRecycle, selectedNote, vault, t]);
 
     const handleViewHistory = (note: Note) => {
         setSelectedNoteForHistory(note);

@@ -4,6 +4,7 @@ import {
     mapActionToScopes,
     STORM_EVENT_THRESHOLD,
     STORM_SETTLE_MS,
+    subscribeChangeEvents,
     useRealtimeStore,
 } from "./realtime-store";
 import type { RealtimeAction, RealtimeChangeEvent } from "./types";
@@ -129,5 +130,91 @@ describe("realtime-store", () => {
             trash: 1,
         });
         expect(useRealtimeStore.getState().resyncSeq).toBe(1);
+    });
+
+    it("delivers every synchronous change event in arrival order and stops calling after unsubscribe", () => {
+        const received: Array<{ path: string; action: RealtimeAction; seq: number }> = [];
+        const unsubscribe = subscribeChangeEvents((event, seq) => {
+            received.push({ path: event.path, action: event.action, seq });
+        });
+
+        const store = useRealtimeStore.getState();
+        store.ingestFrame(
+            { type: "change", data: makeChange("NoteSyncRename", { path: "a2.md", oldPath: "a.md", ts: 10 }) },
+            "doge",
+            1000
+        );
+        store.ingestFrame(
+            { type: "change", data: makeChange("NoteSyncModify", { path: "a2.md", ts: 11 }) },
+            "doge",
+            1001
+        );
+        store.ingestFrame(
+            { type: "change", data: makeChange("NoteSyncModify", { path: "b.md", ts: 12 }) },
+            "doge",
+            1002
+        );
+
+        expect(received).toEqual([
+            { path: "a2.md", action: "NoteSyncRename", seq: 1 },
+            { path: "a2.md", action: "NoteSyncModify", seq: 2 },
+            { path: "b.md", action: "NoteSyncModify", seq: 3 },
+        ]);
+
+        unsubscribe();
+
+        store.ingestFrame(
+            { type: "change", data: makeChange("NoteSyncDelete", { path: "c.md", ts: 13 }) },
+            "doge",
+            1003
+        );
+        expect(received).toHaveLength(3);
+    });
+
+    it("does not replay old events after reset or vault switch and drops mismatched vault frames", () => {
+        const store = useRealtimeStore.getState();
+        store.setActiveVault("vaultA");
+        store.ingestFrame(
+            { type: "change", data: makeChange("NoteSyncModify", { vault: "vaultA", path: "old.md" }) },
+            "vaultA",
+            1000
+        );
+        expect(useRealtimeStore.getState().lastChangeEvent?.path).toBe("old.md");
+
+        // 切换笔记库清空旧库事件槽位，新订阅方不会收到旧事件，且旧库迟到事件被拦截
+        store.setActiveVault("vaultB");
+        expect(useRealtimeStore.getState().lastChangeEvent).toBeNull();
+
+        const receivedAfterSwitch: string[] = [];
+        const unsubAfterSwitch = subscribeChangeEvents((event) => {
+            receivedAfterSwitch.push(event.path);
+        });
+
+        store.ingestFrame(
+            { type: "change", data: makeChange("NoteSyncModify", { vault: "vaultA", path: "stale-from-a.md" }) },
+            "vaultB",
+            1010
+        );
+        expect(receivedAfterSwitch).toEqual([]);
+
+        // reset() 后同样不重放旧事件
+        store.ingestFrame(
+            { type: "change", data: makeChange("NoteSyncModify", { vault: "vaultB", path: "in-b.md" }) },
+            "vaultB",
+            1020
+        );
+        expect(receivedAfterSwitch).toEqual(["in-b.md"]);
+        unsubAfterSwitch();
+
+        store.reset();
+        expect(useRealtimeStore.getState().lastChangeEvent).toBeNull();
+        expect(useRealtimeStore.getState().lastChangeSeq).toBe(0);
+
+        const receivedAfterReset: string[] = [];
+        const unsubAfterReset = subscribeChangeEvents((event) => {
+            receivedAfterReset.push(event.path);
+        });
+        expect(receivedAfterReset).toEqual([]);
+        unsubAfterReset();
     });
 });

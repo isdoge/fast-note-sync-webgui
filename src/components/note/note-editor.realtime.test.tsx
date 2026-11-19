@@ -432,4 +432,160 @@ describe("NoteEditor realtime integration", () => {
         await vi.advanceTimersByTimeAsync(1100);
         expect(mocks.handleSaveNote).toHaveBeenCalledTimes(1);
     });
+
+    it("reloads open note A when A modify is followed synchronously by B modify in the same batch", async () => {
+        let serverContent = "initial content";
+        mocks.handleGetNote.mockImplementation(
+            (_v: string, _p: string, _ph: string | undefined, _r: boolean, cb: (d: NoteDetail) => void, onSettled?: () => void) => {
+                cb(makeDetail(serverContent));
+                onSettled?.();
+            }
+        );
+
+        render(
+            <NoteEditor
+                vault="doge"
+                note={makeNote()}
+                onBack={vi.fn()}
+                onSaveSuccess={vi.fn()}
+            />
+        );
+
+        const editor = await screen.findByTestId("mock-markdown-editor");
+        expect(editor).toHaveValue("initial content");
+
+        serverContent = "remote updated A";
+        act(() => {
+            const store = useRealtimeStore.getState();
+            store.ingestFrame(
+                {
+                    type: "change",
+                    data: {
+                        v: 1,
+                        vault: "doge",
+                        action: "NoteSyncModify",
+                        path: "docs/demo.md",
+                        pathHash: hashCode("docs/demo.md"),
+                        oldPath: "",
+                        oldPathHash: "",
+                        contentHash: hashCode(serverContent),
+                        ctime: 0,
+                        mtime: 0,
+                        updatedTimestamp: 0,
+                        ts: 2000,
+                    },
+                },
+                "doge"
+            );
+            store.ingestFrame(
+                {
+                    type: "change",
+                    data: {
+                        v: 1,
+                        vault: "doge",
+                        action: "NoteSyncModify",
+                        path: "docs/other.md",
+                        pathHash: hashCode("docs/other.md"),
+                        oldPath: "",
+                        oldPathHash: "",
+                        contentHash: hashCode("other content"),
+                        ctime: 0,
+                        mtime: 0,
+                        updatedTimestamp: 0,
+                        ts: 2001,
+                    },
+                },
+                "doge"
+            );
+        });
+
+        await waitFor(() => {
+            expect(screen.getByTestId("mock-markdown-editor")).toHaveValue("remote updated A");
+        });
+    });
+
+    it("follows rename A -> A2 and reloads A2 when both arrive synchronously in the same batch", async () => {
+        const contentByPath: Record<string, string> = {
+            "docs/demo.md": "initial content",
+            "docs/renamed.md": "initial content",
+        };
+        mocks.handleGetNote.mockImplementation(
+            (_v: string, path: string, _ph: string | undefined, _r: boolean, cb: (d: NoteDetail) => void, onSettled?: () => void) => {
+                cb(makeDetail(contentByPath[path] ?? "", path));
+                onSettled?.();
+            }
+        );
+
+        const onRemoteRename = vi.fn();
+        render(
+            <NoteEditor
+                vault="doge"
+                note={makeNote("docs/demo.md")}
+                onBack={vi.fn()}
+                onSaveSuccess={vi.fn()}
+                onRemoteRename={onRemoteRename}
+            />
+        );
+
+        const editor = await screen.findByTestId("mock-markdown-editor");
+        expect(editor).toHaveValue("initial content");
+
+        contentByPath["docs/renamed.md"] = "updated content on A2";
+        act(() => {
+            const store = useRealtimeStore.getState();
+            store.ingestFrame(
+                {
+                    type: "change",
+                    data: {
+                        v: 1,
+                        vault: "doge",
+                        action: "NoteSyncRename",
+                        path: "docs/renamed.md",
+                        pathHash: hashCode("docs/renamed.md"),
+                        oldPath: "docs/demo.md",
+                        oldPathHash: hashCode("docs/demo.md"),
+                        contentHash: "",
+                        ctime: 0,
+                        mtime: 0,
+                        updatedTimestamp: 0,
+                        ts: 2000,
+                    },
+                },
+                "doge"
+            );
+            store.ingestFrame(
+                {
+                    type: "change",
+                    data: {
+                        v: 1,
+                        vault: "doge",
+                        action: "NoteSyncModify",
+                        path: "docs/renamed.md",
+                        pathHash: hashCode("docs/renamed.md"),
+                        oldPath: "",
+                        oldPathHash: "",
+                        contentHash: hashCode("updated content on A2"),
+                        ctime: 0,
+                        mtime: 0,
+                        updatedTimestamp: 0,
+                        ts: 2001,
+                    },
+                },
+                "doge"
+            );
+        });
+
+        expect(onRemoteRename).toHaveBeenCalledWith("docs/renamed.md", hashCode("docs/renamed.md"));
+        await waitFor(() => {
+            expect(screen.getByTestId("mock-markdown-editor")).toHaveValue("updated content on A2");
+        });
+        expect(mocks.handleGetNote).toHaveBeenLastCalledWith(
+            "doge",
+            "docs/renamed.md",
+            hashCode("docs/renamed.md"),
+            false,
+            expect.any(Function),
+            expect.any(Function)
+        );
+    });
 });

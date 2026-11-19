@@ -1,6 +1,6 @@
 import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useRealtimeSync } from "./use-realtime-sync";
+import { buildRealtimeEventsUrl, useRealtimeSync } from "./use-realtime-sync";
 import { useRealtimeStore } from "@/stores/realtime-store";
 
 describe("useRealtimeSync", () => {
@@ -61,5 +61,11 @@ describe("useRealtimeSync", () => {
         expect(useRealtimeStore.getState().status).toBe("idle");
 
         unmount();
+    });
+
+    it("percent-encodes single vault name including commas without splitting", () => {
+        expect(buildRealtimeEventsUrl("https://example.com/", "work,personal")).toBe(
+            "https://example.com/api/webgui/events?vault=work%2Cpersonal"
+        );
     });
 });

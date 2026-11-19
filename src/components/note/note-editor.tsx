@@ -10,7 +10,7 @@ import { useTranslation } from "react-i18next";
 import { Input } from "@/components/ui/input";
 import { hashCode } from "@/lib/utils/hash";
 import { shouldReloadRemote } from "@/lib/realtime/conflict";
-import { useRealtimeStore } from "@/stores/realtime-store";
+import { subscribeChangeEvents, useRealtimeStore } from "@/stores/realtime-store";
 import { format } from "date-fns";
 
 import type { MarkdownEditorRef } from "./markdown-editor";
@@ -81,11 +81,11 @@ export function NoteEditor({
     const savingRef = useRef(false);
     const remoteDeletedRef = useRef(false);
     const remoteConflictRef = useRef(false);
-    const lastChangeSeq = useRealtimeStore(state => state.lastChangeSeq);
-    const lastChangeEvent = useRealtimeStore(state => state.lastChangeEvent);
     const resyncSeq = useRealtimeStore(state => state.resyncSeq);
-    const handledChangeSeqRef = useRef(lastChangeSeq);
     const handledResyncSeqRef = useRef(resyncSeq);
+    const activeTargetRef = useRef<{ path: string; pathHash: string } | null>(
+        note ? { path: note.path, pathHash: note.pathHash } : null
+    );
 
     const [path, setPath] = useState("");
     const [content, setContent] = useState("");
@@ -169,6 +169,7 @@ export function NoteEditor({
             setLastSavedAt(new Date());
             lastSyncedContentRef.current = currentContent;
             useRealtimeStore.getState().markSelfWrite(pathHash, contentHash, Date.now(), fullPath);
+            activeTargetRef.current = { path: fullPath, pathHash };
             // 保存成功后更新 originalNote 的 path，避免后续请求被误判为重命名
             if (originalNote && originalNote.path !== fullPath) {
                 setOriginalNote(prev => prev ? { ...prev, path: fullPath, pathHash } : null);
@@ -193,8 +194,8 @@ export function NoteEditor({
         setRemoteDeleted(false);
         setRemoteConflict(null);
 
-        const targetPath = overridePath || originalNote?.path || note?.path;
-        const targetPathHash = overridePathHash || originalNote?.pathHash || note?.pathHash;
+        const targetPath = overridePath || activeTargetRef.current?.path || originalNoteRef.current?.path || note?.path;
+        const targetPathHash = overridePathHash || activeTargetRef.current?.pathHash || originalNoteRef.current?.pathHash || note?.pathHash;
         if (!targetPath) return;
 
         const requestId = ++loadRequestRef.current;
@@ -202,6 +203,7 @@ export function NoteEditor({
         setLoading(true);
         handleGetNote(vault, targetPath, targetPathHash, isRecycle, (data) => {
             if (requestId !== loadRequestRef.current) return;
+            activeTargetRef.current = { path: data.path, pathHash: data.pathHash };
             originalNoteRef.current = data;
             setOriginalNote(data);
             lastSyncedContentRef.current = data.content;
@@ -212,7 +214,7 @@ export function NoteEditor({
             if (requestId !== loadRequestRef.current) return;
             setLoading(false);
         });
-    }, [note, originalNote, vault, handleGetNote, isRecycle, updatePath]);
+    }, [note, vault, handleGetNote, isRecycle, updatePath]);
 
     const loadNote = useCallback(() => {
         // 切换笔记前：先用旧 path flush 待保存内容，再清除定时器
@@ -232,11 +234,13 @@ export function NoteEditor({
 
         const requestId = ++loadRequestRef.current;
         if (note) {
+            activeTargetRef.current = { path: note.path, pathHash: note.pathHash };
             updatePath(note.path.replace(/\.md$/, ""));
             setLoading(true);
             handleGetNote(vault, note.path, note.pathHash, isRecycle, (data) => {
                 // stale response 保护：丢弃过期请求的响应
                 if (requestId !== loadRequestRef.current) return;
+                activeTargetRef.current = { path: data.path, pathHash: data.pathHash };
                 originalNoteRef.current = data;
                 setOriginalNote(data);
                 lastSyncedContentRef.current = data.content;
@@ -248,6 +252,7 @@ export function NoteEditor({
                 setLoading(false);
             });
         } else {
+            activeTargetRef.current = null;
             updatePath(defaultFolderPath ? (defaultFolderPath + "/") : "");
             lastSyncedContentRef.current = "";
             contentRef.current = "";
@@ -386,83 +391,84 @@ export function NoteEditor({
         }, AUTO_SAVE_DELAY);
     }, [isNewNote, isRecycle, doSave, viewLayout]);
 
-    // 处理实时事件：远端修改、重命名、删除
+    // 处理实时事件：远端修改、重命名、删除（逐条按到达顺序订阅，不漏掉同批后续事件前面的条目）
     useEffect(() => {
-        if (lastChangeSeq === handledChangeSeqRef.current) return;
-        handledChangeSeqRef.current = lastChangeSeq;
+        if (isRecycle || !note) return;
 
-        if (!lastChangeEvent || isRecycle || !note) return;
-        if (lastChangeEvent.vault && lastChangeEvent.vault !== vault) return;
+        return subscribeChangeEvents((event) => {
+            if (event.vault && event.vault !== vault) return;
 
-        const activePath = originalNote?.path || note.path;
-        const activePathHash = originalNote?.pathHash || note.pathHash;
-        const currentEditorContent = editorRef.current?.getValue() ?? contentRef.current;
-        const hasPendingChanges =
-            saveTimerRef.current !== null ||
-            savingRef.current ||
-            currentEditorContent !== lastSyncedContentRef.current;
+            const activePath = activeTargetRef.current?.path || originalNoteRef.current?.path || note.path;
+            const activePathHash = activeTargetRef.current?.pathHash || originalNoteRef.current?.pathHash || note.pathHash;
+            const currentEditorContent = editorRef.current?.getValue() ?? contentRef.current;
+            const hasPendingChanges =
+                saveTimerRef.current !== null ||
+                savingRef.current ||
+                currentEditorContent !== lastSyncedContentRef.current;
 
-        const decision = shouldReloadRemote(lastChangeEvent, {
-            notePath: activePath,
-            notePathHash: activePathHash,
-            currentContentHash: hashCode(currentEditorContent),
-            hasPendingChanges,
-            selfWrites: useRealtimeStore.getState().selfWrites,
-            now: Date.now(),
-        });
-
-        if (decision === "ignore") {
-            return;
-        }
-
-        if (decision === "deleted") {
-            if (saveTimerRef.current) {
-                clearTimeout(saveTimerRef.current);
-                saveTimerRef.current = null;
-            }
-            remoteDeletedRef.current = true;
-            remoteConflictRef.current = false;
-            setRemoteDeleted(true);
-            setRemoteConflict(null);
-            return;
-        }
-
-        if (decision === "renamed") {
-            const newFullPath = lastChangeEvent.path || activePath;
-            const newPathHash = lastChangeEvent.pathHash || hashCode(newFullPath);
-            updatePath(newFullPath.replace(/\.md$/, ""));
-            if (originalNoteRef.current) {
-                originalNoteRef.current = {
-                    ...originalNoteRef.current,
-                    path: newFullPath,
-                    pathHash: newPathHash,
-                };
-            }
-            setOriginalNote(prev => prev ? { ...prev, path: newFullPath, pathHash: newPathHash } : null);
-            onRemoteRename?.(newFullPath, newPathHash);
-            if (!hasPendingChanges && lastChangeEvent.contentHash && lastChangeEvent.contentHash !== hashCode(currentEditorContent)) {
-                reloadFromRemote(newFullPath, newPathHash);
-            }
-            return;
-        }
-
-        if (decision === "conflict") {
-            if (saveTimerRef.current) {
-                clearTimeout(saveTimerRef.current);
-                saveTimerRef.current = null;
-            }
-            remoteConflictRef.current = true;
-            setRemoteConflict({
-                contentHash: lastChangeEvent.contentHash,
-                ts: lastChangeEvent.ts,
+            const decision = shouldReloadRemote(event, {
+                notePath: activePath,
+                notePathHash: activePathHash,
+                currentContentHash: hashCode(currentEditorContent),
+                hasPendingChanges,
+                selfWrites: useRealtimeStore.getState().selfWrites,
+                now: Date.now(),
             });
-            return;
-        }
 
-        if (decision === "reload") {
-            reloadFromRemote();
-        }
-    }, [lastChangeSeq, lastChangeEvent, isRecycle, note, originalNote, vault, updatePath, onRemoteRename, reloadFromRemote]);
+            if (decision === "ignore") {
+                return;
+            }
+
+            if (decision === "deleted") {
+                if (saveTimerRef.current) {
+                    clearTimeout(saveTimerRef.current);
+                    saveTimerRef.current = null;
+                }
+                remoteDeletedRef.current = true;
+                remoteConflictRef.current = false;
+                setRemoteDeleted(true);
+                setRemoteConflict(null);
+                return;
+            }
+
+            if (decision === "renamed") {
+                const newFullPath = event.path || activePath;
+                const newPathHash = event.pathHash || hashCode(newFullPath);
+                activeTargetRef.current = { path: newFullPath, pathHash: newPathHash };
+                updatePath(newFullPath.replace(/\.md$/, ""));
+                if (originalNoteRef.current) {
+                    originalNoteRef.current = {
+                        ...originalNoteRef.current,
+                        path: newFullPath,
+                        pathHash: newPathHash,
+                    };
+                }
+                setOriginalNote(prev => prev ? { ...prev, path: newFullPath, pathHash: newPathHash } : null);
+                onRemoteRename?.(newFullPath, newPathHash);
+                if (!hasPendingChanges && event.contentHash && event.contentHash !== hashCode(currentEditorContent)) {
+                    reloadFromRemote(newFullPath, newPathHash);
+                }
+                return;
+            }
+
+            if (decision === "conflict") {
+                if (saveTimerRef.current) {
+                    clearTimeout(saveTimerRef.current);
+                    saveTimerRef.current = null;
+                }
+                remoteConflictRef.current = true;
+                setRemoteConflict({
+                    contentHash: event.contentHash,
+                    ts: event.ts,
+                });
+                return;
+            }
+
+            if (decision === "reload") {
+                reloadFromRemote(activePath, activePathHash);
+            }
+        });
+    }, [isRecycle, note, vault, updatePath, onRemoteRename, reloadFromRemote]);
 
     // 处理 resync / 事件风暴整体失效：无本地未保存改动且不在加载中时静默重载
     useEffect(() => {

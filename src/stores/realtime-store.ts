@@ -94,6 +94,20 @@ function clearCoalescer() {
     coalescer.stormStartAt = 0;
 }
 
+export type ChangeEventListener = (event: RealtimeChangeEvent, seq: number) => void;
+
+const changeListeners = new Set<ChangeEventListener>();
+
+/**
+ * 订阅通过校验的实时变更事件（按到达顺序同步回调，不经 React 批处理槽位覆盖）。
+ */
+export function subscribeChangeEvents(listener: ChangeEventListener): () => void {
+    changeListeners.add(listener);
+    return () => {
+        changeListeners.delete(listener);
+    };
+}
+
 export interface RealtimeState {
     status: RealtimeConnectionStatus;
     activeVault: string | null;
@@ -189,7 +203,11 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => {
 
         setActiveVault: (vault) => {
             clearCoalescer();
-            set({ activeVault: vault });
+            set((state) => (
+                state.activeVault === vault
+                    ? { activeVault: vault }
+                    : { activeVault: vault, lastChangeEvent: null }
+            ));
         },
 
         bump: (scopes) => {
@@ -249,10 +267,20 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => {
                 return;
             }
 
-            set((state) => ({
-                lastChangeEvent: event,
-                lastChangeSeq: state.lastChangeSeq + 1,
-            }));
+            let nextSeq = 0;
+            set((state) => {
+                nextSeq = state.lastChangeSeq + 1;
+                return {
+                    lastChangeEvent: event,
+                    lastChangeSeq: nextSeq,
+                };
+            });
+
+            for (const listener of Array.from(changeListeners)) {
+                if (changeListeners.has(listener)) {
+                    listener(event, nextSeq);
+                }
+            }
 
             const scopes = mapActionToScopes(event.action, event.path);
             scheduleCoalescedScopes(scopes, now);
