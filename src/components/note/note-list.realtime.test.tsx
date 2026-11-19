@@ -87,7 +87,7 @@ vi.mock("@/components/ui/dropdown-menu", () => ({
     DropdownMenuItem: ({ children }: { children: React.ReactNode }) => <button type="button">{children}</button>,
 }));
 
-function Harness({ vault = "doge", initialViewMode = "flat-file", isRecycle = false }: { vault?: string; initialViewMode?: ViewModeType; isRecycle?: boolean }) {
+function Harness({ vault = "doge", initialViewMode = "flat-file", isRecycle = false, onSelectNote = vi.fn() }: { vault?: string; initialViewMode?: ViewModeType; isRecycle?: boolean; onSelectNote?: (note: Note, previewMode?: boolean) => void }) {
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(10);
     const [searchKeyword, setSearchKeyword] = useState("");
@@ -100,7 +100,7 @@ function Harness({ vault = "doge", initialViewMode = "flat-file", isRecycle = fa
     return (
         <NoteList
             vault={vault}
-            onSelectNote={vi.fn()}
+            onSelectNote={onSelectNote}
             onCreateNote={vi.fn()}
             page={page}
             setPage={setPage}
@@ -297,5 +297,28 @@ describe("NoteList realtime scopes (shares, files, trash)", () => {
         await waitFor(() => {
             expect(screen.queryByTestId("file-preview-url")).not.toBeInTheDocument();
         });
+    });
+
+    it("opens .canvas files via onSelectNote (CanvasViewer) instead of FilePreview", async () => {
+        mocks.handleFileList.mockImplementation((_v: string, _pg: number, _ps: number, _r: boolean, _kw: string, _sb: string, _so: string, cb: (d: FileListResponse) => void) =>
+            cb({
+                list: [{ path: "diagrams/board.canvas", pathHash: "h-canvas", contentHash: "c-canvas", size: 50, ctime: 10, mtime: 20, lastTime: 20 }],
+                pager: { page: 1, pageSize: 10, totalRows: 1, totalPages: 1 },
+            })
+        );
+
+        const onSelectNote = vi.fn();
+        render(<Harness initialViewMode="flat-file" onSelectNote={onSelectNote} />);
+
+        fireEvent.click(await screen.findByText("diagrams/board.canvas"));
+
+        expect(onSelectNote).toHaveBeenCalledWith(
+            expect.objectContaining({
+                path: "diagrams/board.canvas",
+                pathHash: "h-canvas",
+            }),
+            true
+        );
+        expect(screen.queryByTestId("file-preview-url")).not.toBeInTheDocument();
     });
 });

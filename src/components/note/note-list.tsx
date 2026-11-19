@@ -21,7 +21,7 @@ import { ShareModal } from "@/components/share/share-modal";
 import { DndContext, useDraggable, useDroppable, DragEndEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { cn } from "@/lib/utils";
 import { FilePreview } from "@/components/file/file-preview";
-import { getFileCategory } from "@/lib/utils/file-preview";
+import { getFileCategory, getFileExtension } from "@/lib/utils/file-preview";
 import { useFileHandle } from "@/components/api-handle/file-handle";
 import { File as FileDTO, FileListResponse } from "@/lib/types/file";
 import { useMobile } from "@/hooks/use-mobile";
@@ -975,6 +975,21 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
      * 处理附件点击 (预览或下载) / Handle attachment click (preview or download)
      */
     const handleFileClick = (file: FileDTO) => {
+        if (getFileExtension(file.path) === "canvas") {
+            onSelectNote({
+                id: 0,
+                action: "",
+                path: file.path,
+                pathHash: file.pathHash,
+                ctime: file.ctime,
+                mtime: file.mtime,
+                updatedTimestamp: file.mtime,
+                updatedAt: "",
+                createdAt: "",
+                version: 0,
+            }, true);
+            return;
+        }
         let url = getRawFileUrl(vault, file.path, file.pathHash?.toString(), file.contentHash || file.mtime);
         if (isRecycle) {
             url += (url.includes("?") ? "&" : "?") + "isRecycle=1";
