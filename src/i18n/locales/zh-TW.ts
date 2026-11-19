@@ -60,6 +60,7 @@ export default {
     "ui.common.createdAt": "建立時間",
     "ui.common.updatedAt": "更新時間",
     "ui.common.noSearchResults": "沒有找到符合的結果",
+    "ui.common.results": "條結果",
     "ui.common.selectAll": "全選",
     "ui.common.items": "條",
     "ui.common.count": "個",
@@ -282,6 +283,7 @@ export default {
     "ui.note.downloadMarkdown": "下載 Markdown 原始檔案",
     "ui.note.search": "搜索",
     "ui.note.searchPlaceholder": "搜索筆記...",
+    "ui.note.searchAllPlaceholder": "搜尋筆記與附件...",
     "ui.note.noteTitlePlaceholder": "筆記標題 (例如: note.md)",
     "ui.note.noteContentPlaceholder": "請輸入筆記內容...",
     "ui.note.noteCount": "筆記數量",
@@ -306,6 +308,7 @@ export default {
     "ui.note.noVaultsForNotes": "還沒有任何筆记庫",
     "ui.note.searchPath": "路徑",
     "ui.note.searchContentMode": "內容",
+    "ui.note.searchFilterAll": "全部（筆記與附件）",
 
     "ui.note.sortByBy": "排序",
     "ui.note.sortByMtime": "修改時間",

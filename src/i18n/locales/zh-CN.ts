@@ -60,6 +60,7 @@ export default {
     "ui.common.createdAt": "创建时间",
     "ui.common.updatedAt": "更新时间",
     "ui.common.noSearchResults": "没有找到匹配的结果",
+    "ui.common.results": "条结果",
     "ui.common.selectAll": "全选",
     "ui.common.items": "条",
     "ui.common.count": "个",
@@ -284,6 +285,7 @@ export default {
     "ui.note.downloadMarkdown": "下载 Markdown 源文件",
     "ui.note.search": "搜索",
     "ui.note.searchPlaceholder": "搜索笔记...",
+    "ui.note.searchAllPlaceholder": "搜索笔记和附件...",
     "ui.note.noteTitlePlaceholder": "笔记标题 (例如: note.md)",
     "ui.note.noteContentPlaceholder": "请输入笔记内容...",
     "ui.note.noteCount": "笔记数量",
@@ -308,6 +310,7 @@ export default {
     "ui.note.noVaultsForNotes": "还没有任何笔记库",
     "ui.note.searchPath": "路径",
     "ui.note.searchContentMode": "内容",
+    "ui.note.searchFilterAll": "全部（笔记和附件）",
 
     "ui.note.sortByBy": "排序",
     "ui.note.sortByMtime": "修改时间",

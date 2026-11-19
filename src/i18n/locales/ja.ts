@@ -60,6 +60,7 @@ export default {
     "ui.common.createdAt": "作成日時",
     "ui.common.updatedAt": "更新日時",
     "ui.common.noSearchResults": "一致する結果が見つかりませんでした",
+    "ui.common.results": "件の結果",
     "ui.common.selectAll": "すべて選択",
     "ui.common.items": "件",
     "ui.common.count": "個",
@@ -282,6 +283,7 @@ export default {
     "ui.note.downloadMarkdown": "Markdown ソースファイルをダウンロード",
     "ui.note.search": "検索",
     "ui.note.searchPlaceholder": "ノートを検索...",
+    "ui.note.searchAllPlaceholder": "ノートと添付ファイルを検索...",
     "ui.note.noteTitlePlaceholder": "ノートタイトル (例: note.md)",
     "ui.note.noteContentPlaceholder": "ノートの内容を入力してください...",
     "ui.note.noteCount": "ノートの数",
@@ -306,6 +308,7 @@ export default {
     "ui.note.noVaultsForNotes": "まだノート庫がありません",
     "ui.note.searchPath": "パス",
     "ui.note.searchContentMode": "内容",
+    "ui.note.searchFilterAll": "すべて（ノートと添付ファイル）",
 
     "ui.note.sortByBy": "ソート",
     "ui.note.sortByMtime": "更新日時",

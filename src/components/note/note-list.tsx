@@ -282,7 +282,7 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
     const [notes, setNotes] = useState<Note[]>([]);
     const [loading, setLoading] = useState(false);
     const [totalRows, setTotalRows] = useState(0);
-    const [filterType, setFilterType] = useState<'notes' | 'files'>('notes');
+    const [filterType, setFilterType] = useState<'all' | 'notes' | 'files'>(() => (isRecycle ? 'notes' : 'all'));
     const [debouncedKeyword, setDebouncedKeyword] = useState(searchKeyword);
     const [searchMode, setSearchMode] = useState<SearchMode>("path");
 
@@ -376,6 +376,10 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
 
 
 
+    const trimmedKeyword = debouncedKeyword.trim();
+    const isMixedSearch = !isRecycle && shareFilter !== "active" && Boolean(trimmedKeyword) && filterType === "all";
+    const isMergedView = !isRecycle && shareFilter !== "active" && (isMixedSearch || viewMode === "folder");
+
     const fetchNotes = (
         currentPage: number = page,
         currentPageSize: number = pageSize,
@@ -384,6 +388,8 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
         keyword: string = debouncedKeyword
     ) => {
         const requestId = ++noteRequestIdRef.current;
+        const activeKeyword = keyword.trim();
+        const mixedSearchActive = !isRecycle && shareFilter !== "active" && Boolean(activeKeyword) && filterType === "all";
 
         setLoading(true);
 
@@ -414,6 +420,32 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
                 setNotes(data?.list || []);
                 setTotalRows(data?.pager?.totalRows || 0);
                 setLoading(false);
+            });
+            return;
+        }
+
+        // 搜索态混合查询：同时按关键词检索笔记和按文件名匹配附件
+        // Mixed search mode: fetch matching notes and attachment filenames in parallel
+        if (mixedSearchActive) {
+            setFolders([]);
+            setFileLoading(true);
+            Promise.all([
+                new Promise<{ list: Note[]; pager: { page: number; pageSize: number; totalRows: number } } | null>(resolve =>
+                    handleNoteList(vault, 1, 99999, activeKeyword, false, searchMode, false, sortBy, sortOrder, resolve)
+                ),
+                new Promise<FileListResponse | null>(resolve =>
+                    handleFileList(vault, 1, 99999, false, activeKeyword, sortBy, sortOrder, resolve)
+                )
+            ]).then(([noteData, fileData]) => {
+                if (requestId !== noteRequestIdRef.current) return;
+                const notesList = noteData?.list || [];
+                const filesList = fileData?.list || [];
+                setNotes(notesList);
+                setFiles(filesList);
+                setTotalRows(notesList.length);
+                setFilesTotalRows(filesList.length);
+                setLoading(false);
+                setFileLoading(false);
             });
             return;
         }
@@ -451,7 +483,7 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
                 const filesList = fileData?.list || [];
                 setNotes(notesList);
                 setFiles(filesList);
-                setTotalRows(notesList.length + filesList.length);
+                setTotalRows(notesList.length);
                 setFilesTotalRows(filesList.length);
                 setLoading(false);
                 setFileLoading(false);
@@ -474,19 +506,24 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
         fetchNotes(page, pageSize, filePage, filePageSize, debouncedKeyword);
         setSelectedPaths(new Set()); // 清空选中
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [vault, page, pageSize, filePage, filePageSize, debouncedKeyword, isRecycle, searchMode, sortBy, sortOrder, viewMode, currentPath, currentPathHash, shareFilter, shareFilterActiveDep]);
+    }, [vault, page, pageSize, filePage, filePageSize, debouncedKeyword, filterType, isRecycle, searchMode, sortBy, sortOrder, viewMode, currentPath, currentPathHash, shareFilter, shareFilterActiveDep]);
 
     useEffect(() => {
-        if (debouncedKeyword) {
-            setViewMode(filterType === "files" ? "flat-file" : "flat");
+        if (debouncedKeyword.trim() && !isRecycle) {
+            if (filterType === "files") {
+                setViewMode("flat-file");
+            } else if (filterType === "notes") {
+                setViewMode("flat");
+            }
         }
         setPage(1);
         setFilePage(1);
-    }, [debouncedKeyword, filterType, setPage, setViewMode]);
+    }, [debouncedKeyword, filterType, isRecycle, setPage, setViewMode]);
 
     useEffect(() => {
         if (isRecycle) {
             setViewMode("flat");
+            setFilterType("notes");
             if (searchMode === "content") {
                 setSearchMode("path");
             }
@@ -494,7 +531,7 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
     }, [isRecycle, setViewMode, searchMode]);
 
     const handlePageChange = (newPage: number) => {
-        const currentTotalRows = viewMode === "folder" ? mergedList.length : totalRows;
+        const currentTotalRows = isMergedView ? mergedList.length : totalRows;
         if (newPage >= 1 && newPage <= Math.ceil(currentTotalRows / pageSize)) {
             setPage(newPage);
         }
@@ -906,7 +943,7 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
     // 合并并排序的混合列表项
     // Merged and sorted list of notes and attachments
     const mergedList = useMemo(() => {
-        if (viewMode !== "folder" || isRecycle) return [];
+        if (!isMergedView) return [];
 
         const noteItems = notes.map(n => ({
             type: "note" as const,
@@ -945,16 +982,16 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
         });
 
         return combined;
-    }, [notes, files, viewMode, isRecycle, sortBy, sortOrder]);
+    }, [notes, files, isMergedView, sortBy, sortOrder]);
 
-    // 计算融合后列表的总记录数，用于在当前目录下过滤时的统一分页
-    const displayTotalRows = viewMode === "folder" ? mergedList.length : totalRows;
+    // 计算融合后列表的总记录数，用于在当前目录下过滤或混合搜索时的统一分页
+    const displayTotalRows = isMergedView ? mergedList.length : totalRows;
 
     // 对融合后的列表做前端切片分页 / Frontend pagination for the merged list
     const paginatedItems = useMemo(() => {
-        if (viewMode !== "folder" || isRecycle) return [];
+        if (!isMergedView) return [];
         return mergedList.slice((page - 1) * pageSize, page * pageSize);
-    }, [mergedList, viewMode, isRecycle, page, pageSize]);
+    }, [mergedList, isMergedView, page, pageSize]);
 
 
 
@@ -1005,7 +1042,15 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
                             <Input
                                 type="text"
-                                placeholder={filterType === "files" ? t("ui.file.searchPlaceholder") : t("ui.note.searchPlaceholder")}
+                                placeholder={
+                                    isRecycle
+                                        ? t("ui.note.searchPlaceholder")
+                                        : filterType === "files"
+                                            ? t("ui.file.searchPlaceholder")
+                                            : filterType === "notes"
+                                                ? t("ui.note.searchPlaceholder")
+                                                : t("ui.note.searchAllPlaceholder")
+                                }
                                 className="pl-9 pr-14 rounded-xl"
                                 value={searchKeyword}
                                 onChange={(e) => setSearchKeyword(e.target.value)}
@@ -1061,6 +1106,13 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
                                         </div>
 
                                         <DropdownMenuItem
+                                            onClick={() => setFilterType("all")}
+                                            disabled={isRecycle}
+                                            className={`rounded-lg flex items-center justify-between text-xs sm:text-sm ${filterType === "all" ? "bg-accent text-accent-foreground font-medium" : ""} ${isRecycle ? "opacity-40" : ""}`}
+                                        >
+                                            <span>{t("ui.note.searchFilterAll")}</span>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem
                                             onClick={() => setFilterType("notes")}
                                             className={`rounded-lg flex items-center justify-between text-xs sm:text-sm ${filterType === "notes" ? "bg-accent text-accent-foreground font-medium" : ""}`}
                                         >
@@ -1068,8 +1120,8 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
                                         </DropdownMenuItem>
                                         <DropdownMenuItem
                                             onClick={() => setFilterType("files")}
-                                            disabled={searchMode === "content"}
-                                            className={`rounded-lg flex items-center justify-between text-xs sm:text-sm ${filterType === "files" ? "bg-accent text-accent-foreground font-medium" : ""} ${searchMode === "content" ? "opacity-40" : ""}`}
+                                            disabled={searchMode === "content" || isRecycle}
+                                            className={`rounded-lg flex items-center justify-between text-xs sm:text-sm ${filterType === "files" ? "bg-accent text-accent-foreground font-medium" : ""} ${(searchMode === "content" || isRecycle) ? "opacity-40" : ""}`}
                                         >
                                             <span>{t("ui.file.file", "仅看附件")}</span>
                                         </DropdownMenuItem>
@@ -1106,7 +1158,7 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
                                         {uploading ? t("ui.file.uploading", "上传中...") : t("ui.file.upload", "上传附件")}
                                     </span>
                                 </Button>
-                                {viewMode === "folder" && (
+                                {viewMode === "folder" && !isMixedSearch && (
                                     <Button onClick={onCreateFolder} variant="outline" className="rounded-xl shrink-0">
                                         <FolderPlus className="h-4 w-4 sm:mr-2" />
                                         <span className="hidden sm:inline">{t("ui.note.newFolder")}</span>
@@ -1129,7 +1181,7 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
                     <div className="flex items-center gap-3">
                         <div className="flex items-center h-8 rounded-lg border border-border overflow-hidden bg-background shadow-sm">
                             <button
-                                className={`px-4 h-full text-xs font-medium transition-colors ${viewMode === 'folder' ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+                                className={`px-4 h-full text-xs font-medium transition-colors ${!isMixedSearch && viewMode === 'folder' ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
                                 onClick={() => {
                                     setSearchKeyword("");
                                     setDebouncedKeyword("");
@@ -1140,8 +1192,11 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
                                 {t("ui.note.viewFolder")}
                             </button>
                             <button
-                                className={`px-4 h-full text-xs font-medium transition-colors border-l border-border ${viewMode === 'flat' ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+                                className={`px-4 h-full text-xs font-medium transition-colors border-l border-border ${!isMixedSearch && viewMode === 'flat' ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
                                 onClick={() => {
+                                    if (debouncedKeyword.trim()) {
+                                        setFilterType("notes");
+                                    }
                                     setViewMode("flat");
                                     setShareFilter(null);
                                 }}
@@ -1149,8 +1204,11 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
                                 {t("ui.note.viewFlatNotes")}
                             </button>
                             <button
-                                className={`px-4 h-full text-xs font-medium transition-colors border-l border-border ${viewMode === 'flat-file' ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+                                className={`px-4 h-full text-xs font-medium transition-colors border-l border-border ${!isMixedSearch && viewMode === 'flat-file' ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
                                 onClick={() => {
+                                    if (debouncedKeyword.trim()) {
+                                        setFilterType("files");
+                                    }
                                     setViewMode("flat-file");
                                     setShareFilter(null);
                                 }}
@@ -1173,7 +1231,9 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
                             )}
                         </div>
                         <span className="text-sm font-medium text-muted-foreground mr-2">
-                            {viewMode === 'flat-file' ? (
+                            {isMixedSearch ? (
+                                `${totalRows} ${t("ui.note.note")} / ${filesTotalRows} ${t("ui.file.file")}`
+                            ) : viewMode === 'flat-file' ? (
                                 `${filesTotalRows} ${t("ui.file.file")}`
                             ) : viewMode === 'workspace' ? (
                                 t("ui.note.documentTree")
@@ -1347,9 +1407,9 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
             {/* 启用拖拽上下文包裹面包屑导航与列表 */}
             {/* Enable Drag & Drop context wrapping breadcrumbs and lists */}
             <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-                {/* 面包屑导航 - 仅在目录模式且无分享筛选时显示 */}
-                {/* Breadcrumbs navigation - only displayed in folder mode without active share filter */}
-                {viewMode === "folder" && !isRecycle && currentPath && !shareFilter && (
+                {/* 面包屑导航 - 仅在目录模式且非搜索、无分享筛选时显示 */}
+                {/* Breadcrumbs navigation - only displayed in folder mode without active search or share filter */}
+                {viewMode === "folder" && !isMixedSearch && !isRecycle && currentPath && !shareFilter && (
                     <div 
                         // 面包屑容器使用 py-2 提供变大安全区域，使用 mb-4 拉开下部间距，并使用 z-30 提供层级保护
                         // Breadcrumbs wrapper uses py-2 for scale breathing room, mb-4 for visual gap, and z-30 for layout layering
@@ -1414,15 +1474,15 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
                     </div>
                 ) : (
                     <div className="-mx-2 px-2 relative z-10 space-y-6">
-                        {/* 1. 目录浏览视图 */}
-                        {/* 1. Folder view mode */}
-                        {viewMode === "folder" && !isRecycle && (
+                        {/* 1. 目录浏览与搜索混合视图 */}
+                        {/* 1. Folder & mixed search view mode */}
+                        {isMergedView && (
                             <>
                                 {(!Array.isArray(folders) || folders.length === 0) &&
                                  (!Array.isArray(notes) || notes.length === 0) &&
                                  (!Array.isArray(files) || files.length === 0) ? (
                                     <div className="rounded-xl border border-border bg-card p-12 text-center text-muted-foreground">
-                                        {t("ui.common.noData")}
+                                        {isMixedSearch ? t("ui.common.noSearchResults") : t("ui.common.noData")}
                                     </div>
                                 ) : (
                                     <div className="flex flex-col gap-3">
@@ -1505,7 +1565,7 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
                                                                             </span>
                                                                             <div className="min-w-0 flex-1">
                                                                                 <h3 className="font-semibold text-card-foreground truncate flex items-center gap-1">
-                                                                                    <span className="truncate">{note.path.split("/").pop()?.replace(/\.md$/, "")}</span>
+                                                                                    <span className="truncate">{isMixedSearch ? note.path.replace(/\.md$/, "") : note.path.split("/").pop()?.replace(/\.md$/, "")}</span>
                                                                                     {noteIsShared && <Share2 className="h-3 w-3 text-green-500 shrink-0" />}
                                                                                 </h3>
                                                                                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1.5 text-xs text-muted-foreground">
@@ -1557,7 +1617,7 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
                                                                             </span>
                                                                             <div className="min-w-0 flex-1">
                                                                                 <h3 className="font-semibold text-card-foreground truncate flex items-center gap-1.5">
-                                                                                    <span className="truncate">{file.path.split("/").pop()}</span>
+                                                                                    <span className="truncate">{isMixedSearch ? file.path : file.path.split("/").pop()}</span>
                                                                                     <Paperclip className="h-3 w-3 text-muted-foreground shrink-0" />
                                                                                 </h3>
                                                                                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1.5 text-xs text-muted-foreground">
@@ -1568,7 +1628,8 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
                                                                                     </span>
                                                                                     <span className="flex items-center gap-1">
                                                                                         <Clock className="h-3.5 w-3.5" />
-                                                                                        {format(new Date(file.mtime), "yyyy-MM-dd HH:mm")}
+                                                                                        <span className="hidden sm:inline">{format(new Date(file.mtime), "yyyy-MM-dd HH:mm")}</span>
+                                                                                        <span className="sm:hidden">{format(new Date(file.mtime), "MM-dd HH:mm")}</span>
                                                                                     </span>
                                                                                 </div>
                                                                             </div>
@@ -1589,7 +1650,29 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
                                                     })}
                                                 </div>
                                                 {/* 融合列表统一分页 */}
-                                                {Math.ceil(displayTotalRows / pageSize) > 1 && (
+                                                {isMixedSearch ? (
+                                                    <div className="flex flex-col sm:flex-row items-start sm:items-center sm:justify-between gap-4 pt-2 shrink-0">
+                                                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                                            <span className="whitespace-nowrap">{t("ui.common.of")} {displayTotalRows} {t("ui.common.results")}</span>
+                                                            <Select value={pageSize.toString()} onValueChange={(val) => {
+                                                                setPageSize(parseInt(val));
+                                                                setPage(1);
+                                                            }}>
+                                                                <SelectTrigger className="h-8 min-w-25 rounded-xl"><SelectValue placeholder={pageSize.toString()} /></SelectTrigger>
+                                                                <SelectContent className="rounded-xl">
+                                                                    {[10, 20, 50, 100].map((size) => (
+                                                                        <SelectItem key={size} value={size.toString()} className="rounded-xl">{size} {t("ui.common.perPage")}</SelectItem>
+                                                                    ))}
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <Button variant="outline" size="sm" onClick={() => handlePageChange(page - 1)} disabled={page === 1 || loading || fileLoading} className="rounded-xl"><ChevronLeft className="h-4 w-4" />{t("ui.common.previous")}</Button>
+                                                            <span className="text-sm font-medium px-2">{page} / {Math.max(1, Math.ceil(displayTotalRows / pageSize))}</span>
+                                                            <Button variant="outline" size="sm" onClick={() => handlePageChange(page + 1)} disabled={page >= Math.ceil(displayTotalRows / pageSize) || loading || fileLoading} className="rounded-xl">{t("ui.common.next")}<ChevronRight className="h-4 w-4" /></Button>
+                                                        </div>
+                                                    </div>
+                                                ) : Math.ceil(displayTotalRows / pageSize) > 1 && (
                                                     <div className="flex justify-end gap-2 pt-2">
                                                         <Button variant="outline" size="sm" onClick={() => handlePageChange(page - 1)} disabled={page === 1} className="rounded-xl h-8 px-2"><ChevronLeft className="h-4 w-4" /></Button>
                                                         <span className="text-xs font-medium flex items-center px-1">{page} / {Math.ceil(displayTotalRows / pageSize)}</span>
@@ -1605,7 +1688,7 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
 
                         {/* 2. 笔记平铺浏览视图 */}
                         {/* 2. Flat Notes view mode */}
-                        {viewMode === "flat" && (
+                        {!isMergedView && viewMode === "flat" && (
                             <>
                                 {(!Array.isArray(notes) || notes.length === 0) ? (
                                     <div className="rounded-xl border border-border bg-card p-12 text-center text-muted-foreground">
@@ -1714,7 +1797,7 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
 
                         {/* 3. 附件平铺浏览视图 */}
                         {/* 3. Flat Attachments view mode */}
-                        {viewMode === "flat-file" && (
+                        {!isMergedView && viewMode === "flat-file" && (
                             <>
                                 {(!Array.isArray(files) || files.length === 0) ? (
                                     <div className="rounded-xl border border-border bg-card p-12 text-center text-muted-foreground">

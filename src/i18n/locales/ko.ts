@@ -60,6 +60,7 @@ export default {
     "ui.common.createdAt": "생성일",
     "ui.common.updatedAt": "수정일",
     "ui.common.noSearchResults": "일치하는 결과를 찾을 수 없습니다",
+    "ui.common.results": "개 결과",
     "ui.common.selectAll": "전체 선택",
     "ui.common.items": "개",
     "ui.common.count": "개",
@@ -282,6 +283,7 @@ export default {
     "ui.note.downloadMarkdown": "Markdown 소스 파일 다운로드",
     "ui.note.search": "검색",
     "ui.note.searchPlaceholder": "노트 검색...",
+    "ui.note.searchAllPlaceholder": "노트 및 첨부 파일 검색...",
     "ui.note.noteTitlePlaceholder": "노트 제목 (예: note.md)",
     "ui.note.noteContentPlaceholder": "노트 내용을 입력하세요...",
     "ui.note.noteCount": "노트 수",
@@ -306,6 +308,7 @@ export default {
     "ui.note.noVaultsForNotes": "아직 노트 저장소가 없습니다",
     "ui.note.searchPath": "경로",
     "ui.note.searchContentMode": "내용",
+    "ui.note.searchFilterAll": "전체 (노트 및 첨부 파일)",
 
     "ui.note.sortByBy": "정렬",
     "ui.note.sortByMtime": "수정 시간",

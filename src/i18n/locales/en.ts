@@ -60,6 +60,7 @@ export default {
     "ui.common.createdAt": "Created At",
     "ui.common.updatedAt": "Updated At",
     "ui.common.noSearchResults": "No matching results found",
+    "ui.common.results": "results",
     "ui.common.selectAll": "Select All",
     "ui.common.items": "items",
     "ui.common.count": "count",
@@ -284,6 +285,7 @@ export default {
     "ui.note.downloadMarkdown": "Download Markdown Source File",
     "ui.note.search": "Search",
     "ui.note.searchPlaceholder": "Search notes...",
+    "ui.note.searchAllPlaceholder": "Search notes and attachments...",
     "ui.note.noteTitlePlaceholder": "Note title (e.g., note.md)",
     "ui.note.noteContentPlaceholder": "Enter note content...",
     "ui.note.noteCount": "Note count",
@@ -308,6 +310,7 @@ export default {
     "ui.note.noVaultsForNotes": "No note vaults yet",
     "ui.note.searchPath": "Path",
     "ui.note.searchContentMode": "Content",
+    "ui.note.searchFilterAll": "All (Notes & Files)",
 
     "ui.note.sortByBy": "Sort by",
     "ui.note.sortByMtime": "Modification time",
