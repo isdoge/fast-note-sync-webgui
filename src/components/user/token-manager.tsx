@@ -359,11 +359,14 @@ const TokenManagerInner = (
 
         if (isSelecting) {
           if (f.endsWith("_rw")) {
-            const rVersion = f.replace("_rw", "_r");
-            next = next.filter(i => i !== rVersion);
+            const prefix = f.slice(0, -3);
+            next = next.filter(i => i !== `${prefix}_r`);
+          } else if (f.endsWith("_w")) {
+            const prefix = f.slice(0, -2);
+            next = next.filter(i => i !== `${prefix}_r`);
           } else if (f.endsWith("_r")) {
-            const rwVersion = f.replace("_r", "_rw");
-            next = next.filter(i => i !== rwVersion);
+            const prefix = f.slice(0, -2);
+            next = next.filter(i => i !== `${prefix}_rw` && i !== `${prefix}_w`);
           }
         }
         return next;
