@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { NoteTreeSidebar } from "./note-tree-sidebar";
+import { useRealtimeStore } from "@/stores/realtime-store";
 import type { File as FileDTO } from "@/lib/types/file";
 import type { Folder } from "@/lib/types/folder";
 import type { Note, NoteListResponse } from "@/lib/types/note";
@@ -269,5 +270,50 @@ describe("NoteTreeSidebar", () => {
 
         fireEvent.click(screen.getByLabelText("ui.common.clear"));
         expect(screen.getByText("Projects")).toBeInTheDocument();
+    });
+
+    it("refreshes tree nodes when realtime notes revision bumps", async () => {
+        useRealtimeStore.getState().reset();
+        let hasExtraNote = false;
+        mocks.handleFolderNotes.mockImplementation(
+            (
+                _vault: string,
+                path: string,
+                _pathHash: string,
+                _page: number,
+                _pageSize: number,
+                _sortBy: string,
+                _sortOrder: string,
+                callback: (data: { list: Note[] } | null) => void,
+            ) => {
+                if (!path) {
+                    callback({
+                        list: hasExtraNote
+                            ? [note("Root.md", "note-root"), note("SyncedNote.md", "note-synced")]
+                            : [note("Root.md", "note-root")],
+                    });
+                    return;
+                }
+                callback({ list: [] });
+            }
+        );
+
+        render(
+            <NoteTreeSidebar
+                vault="Work"
+                selectedPathHash="note-root"
+                onSelectNote={vi.fn()}
+            />
+        );
+
+        expect(await screen.findByText("Root")).toBeInTheDocument();
+        expect(screen.queryByText("SyncedNote")).not.toBeInTheDocument();
+
+        hasExtraNote = true;
+        act(() => {
+            useRealtimeStore.getState().bump("notes");
+        });
+
+        expect(await screen.findByText("SyncedNote")).toBeInTheDocument();
     });
 });

@@ -80,7 +80,9 @@ export function NoteTreeSidebar({ vault, selectedPathHash, onSelectNote, onFolde
     const expandedKeysRef = useRef<Set<string>>(expandedKeys);
     const folderByKeyRef = useRef<Record<string, FolderDTO>>({});
     const treeRevision = useRealtimeStore(state => state.revisions.tree);
-    const lastTreeRevisionRef = useRef(treeRevision);
+    const notesRevision = useRealtimeStore(state => state.revisions.notes);
+    const refreshRevision = treeRevision + notesRevision;
+    const lastRefreshRevisionRef = useRef(refreshRevision);
 
     useEffect(() => {
         expandedKeysRef.current = expandedKeys;
@@ -139,10 +141,10 @@ export function NoteTreeSidebar({ vault, selectedPathHash, onSelectNote, onFolde
     }, [loadChildren, vault]);
 
     useEffect(() => {
-        if (treeRevision === lastTreeRevisionRef.current) {
+        if (refreshRevision === lastRefreshRevisionRef.current) {
             return;
         }
-        lastTreeRevisionRef.current = treeRevision;
+        lastRefreshRevisionRef.current = refreshRevision;
 
         loadChildren(ROOT_KEY, ROOT_PATH, ROOT_PATH_HASH);
         for (const key of expandedKeysRef.current) {
@@ -152,7 +154,7 @@ export function NoteTreeSidebar({ vault, selectedPathHash, onSelectNote, onFolde
                 loadChildren(key, folderItem.path, folderItem.pathHash);
             }
         }
-    }, [treeRevision, loadChildren]);
+    }, [refreshRevision, loadChildren]);
 
     useEffect(() => {
         const timer = window.setTimeout(() => {
@@ -205,7 +207,7 @@ export function NoteTreeSidebar({ vault, selectedPathHash, onSelectNote, onFolde
                 setSearchLoading(false);
             }
         });
-    }, [debouncedSearchKeyword, handleFileList, handleNoteList, vault, treeRevision]);
+    }, [debouncedSearchKeyword, handleFileList, handleNoteList, vault, refreshRevision]);
 
     const toggleFolder = useCallback((folder: FolderDTO) => {
         const key = folder.pathHash || folder.path;

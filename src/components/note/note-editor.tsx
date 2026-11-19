@@ -80,6 +80,7 @@ export function NoteEditor({
     const loadRequestRef = useRef(0);
     const savingRef = useRef(false);
     const remoteDeletedRef = useRef(false);
+    const remoteConflictRef = useRef(false);
     const lastChangeSeq = useRealtimeStore(state => state.lastChangeSeq);
     const lastChangeEvent = useRealtimeStore(state => state.lastChangeEvent);
     const resyncSeq = useRealtimeStore(state => state.resyncSeq);
@@ -188,6 +189,7 @@ export function NoteEditor({
             saveTimerRef.current = null;
         }
         remoteDeletedRef.current = false;
+        remoteConflictRef.current = false;
         setRemoteDeleted(false);
         setRemoteConflict(null);
 
@@ -217,13 +219,14 @@ export function NoteEditor({
         if (saveTimerRef.current) {
             clearTimeout(saveTimerRef.current);
             saveTimerRef.current = null;
-            if (!remoteDeletedRef.current) {
+            if (!remoteDeletedRef.current && !remoteConflictRef.current) {
                 const latestContent = editorRef.current?.getValue() ?? contentRef.current;
                 doSave(pathRef.current, latestContent, true);
             }
         }
 
         remoteDeletedRef.current = false;
+        remoteConflictRef.current = false;
         setRemoteDeleted(false);
         setRemoteConflict(null);
 
@@ -345,7 +348,7 @@ export function NoteEditor({
         clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
 
-        if (remoteDeletedRef.current) return;
+        if (remoteDeletedRef.current || remoteConflictRef.current) return;
 
         const latestContent = editorRef.current?.getValue() ?? contentRef.current;
         doSave(pathRef.current, latestContent, true);
@@ -366,8 +369,8 @@ export function NoteEditor({
 
         // 新建笔记且没有标题时不自动保存
         if (isNewNote && !pathRef.current) return;
-        // 回收站模式或远端已删除时不保存
-        if (isRecycle || remoteDeletedRef.current) return;
+        // 回收站模式、远端已删除或存在未解决冲突时不自动保存
+        if (isRecycle || remoteDeletedRef.current || remoteConflictRef.current) return;
 
         // 清除之前的定时器
         if (saveTimerRef.current) {
@@ -418,6 +421,7 @@ export function NoteEditor({
                 saveTimerRef.current = null;
             }
             remoteDeletedRef.current = true;
+            remoteConflictRef.current = false;
             setRemoteDeleted(true);
             setRemoteConflict(null);
             return;
@@ -443,6 +447,11 @@ export function NoteEditor({
         }
 
         if (decision === "conflict") {
+            if (saveTimerRef.current) {
+                clearTimeout(saveTimerRef.current);
+                saveTimerRef.current = null;
+            }
+            remoteConflictRef.current = true;
             setRemoteConflict({
                 contentHash: lastChangeEvent.contentHash,
                 ts: lastChangeEvent.ts,
@@ -951,7 +960,21 @@ export function NoteEditor({
                             variant="outline"
                             size="sm"
                             className="h-7 rounded-lg"
-                            onClick={() => setRemoteConflict(null)}
+                            onClick={() => {
+                                remoteConflictRef.current = false;
+                                setRemoteConflict(null);
+                                if (saveTimerRef.current) {
+                                    clearTimeout(saveTimerRef.current);
+                                    saveTimerRef.current = null;
+                                }
+                                if (!isRecycle && !remoteDeletedRef.current && pathRef.current) {
+                                    saveTimerRef.current = setTimeout(() => {
+                                        saveTimerRef.current = null;
+                                        const latestContent = editorRef.current?.getValue() ?? contentRef.current;
+                                        doSave(pathRef.current, latestContent, true);
+                                    }, AUTO_SAVE_DELAY);
+                                }
+                            }}
                         >
                             {t("ui.realtime.keepCurrent", { defaultValue: "Keep current" })}
                         </Button>

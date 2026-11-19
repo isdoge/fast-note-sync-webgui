@@ -378,4 +378,58 @@ describe("NoteEditor realtime integration", () => {
         unmount();
         expect(mocks.handleSaveNote).not.toHaveBeenCalled();
     });
+
+    it("pauses pending autosave while remote conflict banner is active until user keeps current", async () => {
+        vi.useFakeTimers();
+        mocks.handleGetNote.mockImplementation(
+            (_v: string, _p: string, _ph: string | undefined, _r: boolean, cb: (d: NoteDetail) => void, onSettled?: () => void) => {
+                cb(makeDetail("initial"));
+                onSettled?.();
+            }
+        );
+
+        render(
+            <NoteEditor
+                vault="doge"
+                note={makeNote()}
+                onBack={vi.fn()}
+                onSaveSuccess={vi.fn()}
+            />
+        );
+
+        await vi.advanceTimersByTimeAsync(0);
+        const editor = screen.getByTestId("mock-markdown-editor");
+        fireEvent.change(editor, { target: { value: "local unsaved edit" } });
+
+        act(() => {
+            useRealtimeStore.getState().ingestFrame(
+                {
+                    type: "change",
+                    data: {
+                        v: 1,
+                        vault: "doge",
+                        action: "NoteSyncModify",
+                        path: "docs/demo.md",
+                        pathHash: hashCode("docs/demo.md"),
+                        oldPath: "",
+                        oldPathHash: "",
+                        contentHash: hashCode("remote edit"),
+                        ctime: 0,
+                        mtime: 0,
+                        updatedTimestamp: 0,
+                        ts: 2000,
+                    },
+                },
+                "doge"
+            );
+        });
+
+        expect(screen.getByRole("status")).toBeInTheDocument();
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(mocks.handleSaveNote).not.toHaveBeenCalled();
+
+        fireEvent.click(screen.getByRole("button", { name: "Keep current" }));
+        await vi.advanceTimersByTimeAsync(1100);
+        expect(mocks.handleSaveNote).toHaveBeenCalledTimes(1);
+    });
 });
