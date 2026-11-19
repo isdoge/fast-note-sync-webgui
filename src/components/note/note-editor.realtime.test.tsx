@@ -588,4 +588,127 @@ describe("NoteEditor realtime integration", () => {
             expect.any(Function)
         );
     });
+
+    it("keeps renamed path across refresh, autosave, and remote events after saveTitle", async () => {
+        vi.useFakeTimers();
+        const contentByPath: Record<string, string> = {
+            "docs/demo.md": "initial content",
+            "docs/renamed-local.md": "initial content",
+        };
+        mocks.handleGetNote.mockImplementation(
+            (_v: string, path: string, _ph: string | undefined, _r: boolean, cb: (d: NoteDetail) => void, onSettled?: () => void) => {
+                cb(makeDetail(contentByPath[path] ?? "", path));
+                onSettled?.();
+            }
+        );
+        mocks.handleRenameNote.mockImplementation(
+            (_params: unknown, onSuccess: () => void) => {
+                onSuccess();
+            }
+        );
+        mocks.handleSaveNote.mockImplementation(
+            (_v: string, path: string, content: string, _o: unknown, onSuccess: () => void) => {
+                contentByPath[path] = content;
+                onSuccess();
+            }
+        );
+
+        const React = await import("react");
+        const onRemoteRename = vi.fn();
+        const onSaveSuccess = vi.fn();
+        function RenameHarness() {
+            const [currentNote, setCurrentNote] = React.useState<Note>(() => makeNote("docs/demo.md"));
+            return (
+                <NoteEditor
+                    vault="doge"
+                    note={currentNote}
+                    onBack={vi.fn()}
+                    onSaveSuccess={onSaveSuccess}
+                    onRemoteRename={(newPath, newPathHash) => {
+                        onRemoteRename(newPath, newPathHash);
+                        setCurrentNote(prev => ({ ...prev, path: newPath, pathHash: newPathHash }));
+                    }}
+                />
+            );
+        }
+        render(<RenameHarness />);
+
+        await vi.advanceTimersByTimeAsync(0);
+        expect(screen.getByTestId("mock-markdown-editor")).toHaveValue("initial content");
+        expect(mocks.handleGetNote).toHaveBeenCalledTimes(1);
+
+        // Rename title in web UI: demo -> renamed-local
+        fireEvent.click(screen.getByText("demo"));
+        const titleInput = screen.getByDisplayValue("demo");
+        fireEvent.change(titleInput, { target: { value: "renamed-local" } });
+        fireEvent.keyDown(titleInput, { key: "Enter" });
+
+        expect(mocks.handleRenameNote).toHaveBeenCalledWith(
+            expect.objectContaining({
+                vault: "doge",
+                oldPath: "docs/demo.md",
+                path: "docs/renamed-local.md",
+            }),
+            expect.any(Function)
+        );
+        expect(onSaveSuccess).toHaveBeenCalledWith("docs/renamed-local.md", hashCode("docs/renamed-local.md"));
+        expect(onRemoteRename).toHaveBeenCalledWith("docs/renamed-local.md", hashCode("docs/renamed-local.md"));
+        // Updating note prop via onRemoteRename must not trigger a spurious reload
+        expect(mocks.handleGetNote).toHaveBeenCalledTimes(1);
+
+        // Click Refresh button -> must fetch the new path, not the old path
+        fireEvent.click(screen.getByRole("button", { name: "ui.common.refresh" }));
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(mocks.handleGetNote).toHaveBeenLastCalledWith(
+            "doge",
+            "docs/renamed-local.md",
+            hashCode("docs/renamed-local.md"),
+            false,
+            expect.any(Function),
+            expect.any(Function)
+        );
+
+        // Edit and wait for autosave -> must save to the new path
+        fireEvent.change(screen.getByTestId("mock-markdown-editor"), { target: { value: "edited after rename" } });
+        await vi.advanceTimersByTimeAsync(1100);
+
+        expect(mocks.handleSaveNote).toHaveBeenLastCalledWith(
+            "doge",
+            "docs/renamed-local.md",
+            "edited after rename",
+            expect.objectContaining({ pathHash: hashCode("docs/renamed-local.md") }),
+            expect.any(Function),
+            expect.any(Function),
+            true
+        );
+
+        // Remote modify on the new path -> must reload when clean
+        contentByPath["docs/renamed-local.md"] = "remote after rename";
+        act(() => {
+            useRealtimeStore.getState().ingestFrame(
+                {
+                    type: "change",
+                    data: {
+                        v: 1,
+                        vault: "doge",
+                        action: "NoteSyncModify",
+                        path: "docs/renamed-local.md",
+                        pathHash: hashCode("docs/renamed-local.md"),
+                        oldPath: "",
+                        oldPathHash: "",
+                        contentHash: hashCode("remote after rename"),
+                        ctime: 0,
+                        mtime: 0,
+                        updatedTimestamp: 0,
+                        ts: 5000,
+                    },
+                },
+                "doge"
+            );
+        });
+
+        await vi.advanceTimersByTimeAsync(0);
+        expect(screen.getByTestId("mock-markdown-editor")).toHaveValue("remote after rename");
+    });
 });

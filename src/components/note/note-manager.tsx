@@ -561,6 +561,7 @@ export function NoteManager({
                             onBack={handleBack}
                             onNavigateToFolder={handleNavigateToFolder}
                             onSaveSuccess={handleSaveSuccess}
+                            onRemoteRename={handleRemoteRename}
                             onViewHistory={() => selectedNote && handleViewHistory(selectedNote)}
                             isMaximized={isMaximized}
                             onToggleMaximize={onToggleMaximize}
