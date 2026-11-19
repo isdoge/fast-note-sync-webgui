@@ -27,6 +27,39 @@ export type RemoteNoteDecision =
     | "deleted"
     | "renamed";
 
+function normalizePath(path: string): string {
+    return path.replace(/^\/+|\/+$/g, "");
+}
+
+/**
+ * 按 `/` 分段判断 folderPath 是否是 targetPath 的祖先目录（或同路径）。
+ * 例如 "a/b" 是 "a/b/c.md" 的祖先，但不是 "a/bc.md" 的祖先。
+ */
+export function isFolderAncestor(folderPath: string, targetPath: string): boolean {
+    const folder = normalizePath(folderPath);
+    const target = targetPath.replace(/^\/+/, "");
+    if (!folder || !target) return false;
+    return target === folder || target.startsWith(`${folder}/`);
+}
+
+/**
+ * 若 targetPath 位于 oldFolderPath 下，将其目录前缀替换为 newFolderPath；否则返回 null。
+ */
+export function replaceFolderPrefix(
+    targetPath: string,
+    oldFolderPath: string,
+    newFolderPath: string
+): string | null {
+    const oldFolder = normalizePath(oldFolderPath);
+    const newFolder = normalizePath(newFolderPath);
+    const target = targetPath.replace(/^\/+/, "");
+    if (!oldFolder || !target) return null;
+    if (target === oldFolder) return newFolder;
+    if (!target.startsWith(`${oldFolder}/`)) return null;
+    const suffix = target.slice(oldFolder.length + 1);
+    return newFolder ? `${newFolder}/${suffix}` : suffix;
+}
+
 function matchesCurrentTarget(
     eventPathHash: string,
     eventPath: string,
@@ -111,6 +144,10 @@ export function shouldReloadRemote(
         return renameMatched ? "renamed" : "ignore";
     }
 
+    if (event.action === "FolderSyncRename") {
+        return isFolderAncestor(event.oldPath, local.notePath) ? "renamed" : "ignore";
+    }
+
     if (event.action === "NoteSyncDelete") {
         const deleteMatched = matchesCurrentTarget(
             event.pathHash,
@@ -119,6 +156,10 @@ export function shouldReloadRemote(
             local.notePath
         );
         return deleteMatched ? "deleted" : "ignore";
+    }
+
+    if (event.action === "FolderSyncDelete") {
+        return isFolderAncestor(event.path, local.notePath) ? "deleted" : "ignore";
     }
 
     if (event.action !== "NoteSyncModify") {

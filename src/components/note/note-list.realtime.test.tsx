@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
     handleFileList: vi.fn(),
     handleGetNoteSharePaths: vi.fn(),
     handleNoteListByPaths: vi.fn(),
+    getRawFileUrl: vi.fn((v: string, p: string) => `/api/file?vault=${v}&path=${p}`),
 }));
 
 vi.mock("react-i18next", () => ({
@@ -42,7 +43,7 @@ vi.mock("@/components/api-handle/file-handle", () => ({
     useFileHandle: () => ({
         handleFileList: mocks.handleFileList,
         handleDeleteFile: vi.fn(),
-        getRawFileUrl: vi.fn((v: string, p: string) => `/api/file?vault=${v}&path=${p}`),
+        getRawFileUrl: mocks.getRawFileUrl,
         handleFolderFiles: mocks.handleFolderFiles,
         handleRenameFile: vi.fn(),
         handleFileUpload: vi.fn(),
@@ -71,7 +72,7 @@ vi.mock("@/components/share/share-modal", () => ({
 
 vi.mock("@/components/file/file-preview", () => ({
     FilePreview: ({ file, url }: { file: FileDTO; url: string }) => (
-        <div data-testid="file-preview-url" data-path={file.path} data-url={url} />
+        <div data-testid="file-preview-url" data-path={file.path} data-url={url} data-size={String(file.size)} />
     ),
 }));
 
@@ -86,7 +87,7 @@ vi.mock("@/components/ui/dropdown-menu", () => ({
     DropdownMenuItem: ({ children }: { children: React.ReactNode }) => <button type="button">{children}</button>,
 }));
 
-function Harness({ initialViewMode = "flat-file", isRecycle = false }: { initialViewMode?: ViewModeType; isRecycle?: boolean }) {
+function Harness({ vault = "doge", initialViewMode = "flat-file", isRecycle = false, onSelectNote = vi.fn() }: { vault?: string; initialViewMode?: ViewModeType; isRecycle?: boolean; onSelectNote?: (note: Note, previewMode?: boolean) => void }) {
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(10);
     const [searchKeyword, setSearchKeyword] = useState("");
@@ -98,8 +99,8 @@ function Harness({ initialViewMode = "flat-file", isRecycle = false }: { initial
 
     return (
         <NoteList
-            vault="doge"
-            onSelectNote={vi.fn()}
+            vault={vault}
+            onSelectNote={onSelectNote}
             onCreateNote={vi.fn()}
             page={page}
             setPage={setPage}
@@ -249,6 +250,143 @@ describe("NoteList realtime scopes (shares, files, trash)", () => {
             const nextUrl = screen.getByTestId("file-preview-url").getAttribute("data-url");
             expect(nextUrl).not.toBe(initialUrl);
             expect(nextUrl).toContain("_=");
+        });
+    });
+
+    it("passes version arg to getRawFileUrl and syncs previewFile.size when NoteList refreshes", async () => {
+        let currentFile: FileDTO = {
+            path: "big.log",
+            pathHash: "h-big",
+            contentHash: "",
+            size: 3 * 1024 * 1024,
+            ctime: 1,
+            mtime: 100,
+            lastTime: 100,
+        };
+        mocks.handleFileList.mockImplementation((_v: string, _pg: number, _ps: number, _r: boolean, _kw: string, _sb: string, _so: string, cb: (d: FileListResponse) => void) =>
+            cb({
+                list: [currentFile],
+                pager: { page: 1, pageSize: 10, totalRows: 1, totalPages: 1 },
+            })
+        );
+
+        render(<Harness initialViewMode="flat-file" />);
+
+        fireEvent.click(await screen.findByText("big.log"));
+        // Falls back to mtime when contentHash is empty
+        expect(mocks.getRawFileUrl).toHaveBeenCalledWith("doge", "big.log", "h-big", 100);
+        expect(await screen.findByTestId("file-preview-url")).toHaveAttribute("data-size", String(3 * 1024 * 1024));
+
+        currentFile = { ...currentFile, size: 64, contentHash: "c-small-2", mtime: 200 };
+        act(() => {
+            useRealtimeStore.getState().bump("files");
+        });
+
+        await waitFor(() => {
+            expect(screen.getByTestId("file-preview-url")).toHaveAttribute("data-size", "64");
+        });
+    });
+
+    it("clears open preview when switching vault", async () => {
+        const { rerender } = render(<Harness vault="doge" initialViewMode="flat-file" />);
+
+        fireEvent.click(await screen.findByText("a.png"));
+        expect(await screen.findByTestId("file-preview-url")).toBeInTheDocument();
+
+        rerender(<Harness vault="other-vault" initialViewMode="flat-file" />);
+        await waitFor(() => {
+            expect(screen.queryByTestId("file-preview-url")).not.toBeInTheDocument();
+        });
+    });
+
+    it("opens .canvas files via onSelectNote (CanvasViewer) instead of FilePreview", async () => {
+        mocks.handleFileList.mockImplementation((_v: string, _pg: number, _ps: number, _r: boolean, _kw: string, _sb: string, _so: string, cb: (d: FileListResponse) => void) =>
+            cb({
+                list: [{ path: "diagrams/board.canvas", pathHash: "h-canvas", contentHash: "c-canvas", size: 50, ctime: 10, mtime: 20, lastTime: 20 }],
+                pager: { page: 1, pageSize: 10, totalRows: 1, totalPages: 1 },
+            })
+        );
+
+        const onSelectNote = vi.fn();
+        render(<Harness initialViewMode="flat-file" onSelectNote={onSelectNote} />);
+
+        fireEvent.click(await screen.findByText("diagrams/board.canvas"));
+
+        expect(onSelectNote).toHaveBeenCalledWith(
+            expect.objectContaining({
+                path: "diagrams/board.canvas",
+                pathHash: "h-canvas",
+            }),
+            true
+        );
+        expect(screen.queryByTestId("file-preview-url")).not.toBeInTheDocument();
+    });
+
+    it("updates open preview on FolderSyncRename and closes on ancestor FolderSyncDelete in NoteList", async () => {
+        mocks.handleFileList.mockImplementation((_v: string, _pg: number, _ps: number, _r: boolean, _kw: string, _sb: string, _so: string, cb: (d: FileListResponse) => void) =>
+            cb({
+                list: [{ path: "a/b/doc.png", pathHash: "h-ab-doc", contentHash: "c-doc", size: 10, ctime: 1, mtime: 1, lastTime: 1 }],
+                pager: { page: 1, pageSize: 10, totalRows: 1, totalPages: 1 },
+            })
+        );
+
+        render(<Harness initialViewMode="flat-file" />);
+
+        fireEvent.click(await screen.findByText("a/b/doc.png"));
+        expect(await screen.findByTestId("file-preview-url")).toHaveAttribute("data-path", "a/b/doc.png");
+
+        act(() => {
+            useRealtimeStore.getState().ingestFrame(
+                {
+                    type: "change",
+                    data: {
+                        v: 1,
+                        vault: "doge",
+                        action: "FolderSyncRename",
+                        path: "x/y",
+                        pathHash: "h-xy",
+                        oldPath: "a/b",
+                        oldPathHash: "h-ab",
+                        contentHash: "",
+                        ctime: 0,
+                        mtime: 0,
+                        updatedTimestamp: 0,
+                        ts: 2000,
+                    },
+                },
+                "doge"
+            );
+        });
+
+        await waitFor(() => {
+            expect(screen.getByTestId("file-preview-url")).toHaveAttribute("data-path", "x/y/doc.png");
+        });
+
+        act(() => {
+            useRealtimeStore.getState().ingestFrame(
+                {
+                    type: "change",
+                    data: {
+                        v: 1,
+                        vault: "doge",
+                        action: "FolderSyncDelete",
+                        path: "x/y",
+                        pathHash: "h-xy",
+                        oldPath: "",
+                        oldPathHash: "",
+                        contentHash: "",
+                        ctime: 0,
+                        mtime: 0,
+                        updatedTimestamp: 0,
+                        ts: 3000,
+                    },
+                },
+                "doge"
+            );
+        });
+
+        await waitFor(() => {
+            expect(screen.queryByTestId("file-preview-url")).not.toBeInTheDocument();
         });
     });
 });

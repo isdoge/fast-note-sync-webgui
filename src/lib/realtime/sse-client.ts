@@ -57,6 +57,7 @@ export function createSseClient(options: SseClientOptions): SseClient {
     let attempt = 0;
     let abortController: AbortController | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let rateLimitUntil = 0;
     let listenersAttached = false;
 
     const setStatus = (next: RealtimeConnectionStatus) => {
@@ -80,12 +81,16 @@ export function createSseClient(options: SseClientOptions): SseClient {
             retryAfterMs,
             random,
         });
-        if (!isRateLimited) {
+        if (isRateLimited) {
+            rateLimitUntil = Date.now() + delay;
+        } else {
+            rateLimitUntil = 0;
             attempt += 1;
         }
         setStatus("backoff");
         reconnectTimer = setTimeout(() => {
             reconnectTimer = null;
+            rateLimitUntil = 0;
             if (!stopped) {
                 void connect();
             }
@@ -98,6 +103,9 @@ export function createSseClient(options: SseClientOptions): SseClient {
             return;
         }
         if (status === "backoff") {
+            if (Date.now() < rateLimitUntil) {
+                return;
+            }
             clearReconnectTimer();
             void connect();
         }
@@ -127,6 +135,7 @@ export function createSseClient(options: SseClientOptions): SseClient {
 
     const stopPermanent = () => {
         stopped = true;
+        rateLimitUntil = 0;
         clearReconnectTimer();
         abortController?.abort();
         abortController = null;
@@ -240,6 +249,7 @@ export function createSseClient(options: SseClientOptions): SseClient {
 
     const stop = () => {
         stopped = true;
+        rateLimitUntil = 0;
         clearReconnectTimer();
         abortController?.abort();
         abortController = null;

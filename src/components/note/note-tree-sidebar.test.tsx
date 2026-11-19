@@ -316,4 +316,55 @@ describe("NoteTreeSidebar", () => {
 
         expect(await screen.findByText("SyncedNote")).toBeInTheDocument();
     });
+
+    it("prunes stale expanded folder keys after remote folder delete/rename", async () => {
+        useRealtimeStore.getState().reset();
+        let projectsExists = true;
+        mocks.handleFolderList.mockImplementation((
+            _vault: string,
+            path: string,
+            _pathHash: string,
+            callback: (data: Folder[] | null) => void,
+        ) => {
+            if (path === "") {
+                callback(projectsExists ? [folder("Projects", "folder-projects")] : []);
+                return;
+            }
+            callback([]);
+        });
+
+        render(<NoteTreeSidebar vault="Work" onSelectNote={vi.fn()} />);
+
+        const projectsBtn = await screen.findByRole("button", { name: "Projects" });
+        fireEvent.click(projectsBtn);
+        await waitFor(() => {
+            expect(projectsBtn).toHaveAttribute("aria-expanded", "true");
+        });
+
+        // Remote deletes Projects -> tree revision bumps
+        projectsExists = false;
+        act(() => {
+            useRealtimeStore.getState().bump("tree");
+        });
+        await waitFor(() => {
+            expect(screen.queryByRole("button", { name: "Projects" })).not.toBeInTheDocument();
+        });
+
+        // Subsequent note/tree revisions must NOT re-query deleted Projects folder
+        mocks.handleFolderList.mockClear();
+        mocks.handleFolderNotes.mockClear();
+        mocks.handleFolderFiles.mockClear();
+
+        act(() => {
+            useRealtimeStore.getState().bump("notes");
+        });
+
+        await waitFor(() => {
+            expect(mocks.handleFolderList).toHaveBeenCalledTimes(1);
+        });
+        expect(mocks.handleFolderList).toHaveBeenCalledWith("Work", "", "", expect.any(Function));
+        expect(mocks.handleFolderList).not.toHaveBeenCalledWith("Work", "Projects", expect.anything(), expect.anything());
+        expect(mocks.handleFolderNotes).toHaveBeenCalledTimes(1);
+        expect(mocks.handleFolderFiles).toHaveBeenCalledTimes(1);
+    });
 });

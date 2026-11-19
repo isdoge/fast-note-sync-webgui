@@ -90,7 +90,7 @@ describe("TokenManager new function dimensions", () => {
         "",
         "rest,ws",
         "*",
-        "vault_r,vault_w,note_purge,file_purge",
+        "vault_w,note_purge,file_purge",
         ""
       );
     });
@@ -173,5 +173,29 @@ describe("TokenManager new function dimensions", () => {
         "MainVault"
       );
     });
+  });
+
+  it("treats vault_r and vault_w as mutually exclusive when toggling", async () => {
+    const { container } = render(<TokenManager />);
+
+    const addButtons = container.querySelectorAll("button");
+    fireEvent.click(addButtons[addButtons.length - 1]);
+
+    const vaultR = await screen.findByLabelText("ui.token.funcVaultR");
+    const vaultW = screen.getByLabelText("ui.token.funcVaultW");
+
+    fireEvent.click(vaultW);
+    expect(vaultW).toBeChecked();
+    expect(vaultR).not.toBeChecked();
+
+    // Downgrading to read-only must deselect vault_w
+    fireEvent.click(vaultR);
+    expect(vaultR).toBeChecked();
+    expect(vaultW).not.toBeChecked();
+
+    // Upgrading back to write must deselect vault_r
+    fireEvent.click(vaultW);
+    expect(vaultW).toBeChecked();
+    expect(vaultR).not.toBeChecked();
   });
 });

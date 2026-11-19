@@ -200,7 +200,10 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => {
 
         setActiveVault: (vault) => {
             clearCoalescer();
-            set({ activeVault: vault });
+            set((state) => ({
+                activeVault: vault,
+                selfWrites: state.activeVault !== vault ? [] : state.selfWrites,
+            }));
         },
 
         bump: (scopes) => {

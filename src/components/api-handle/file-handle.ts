@@ -285,15 +285,18 @@ export function useFileHandle() {
     }, [getHeaders]);
 
     /**
-     * 获取文件原始内容 URL (带 token)
+     * 获取文件原始内容 URL (带 token 和可选版本参数)
      */
-    const getRawFileUrl = useCallback((vault: string, path: string, pathHash?: string) => {
+    const getRawFileUrl = useCallback((vault: string, path: string, pathHash?: string, version?: string | number) => {
         const apiUrl = env.API_URL.endsWith("/") ? env.API_URL.slice(0, -1) : env.API_URL;
         const currentToken = localStorage.getItem("token") || "";
         const lang = getBrowserLang();
         let url = `${apiUrl}/api/file?vault=${encodeURIComponent(vault)}&path=${encodeURIComponent(path)}&token=${encodeURIComponent(currentToken)}&lang=${lang}`;
         if (pathHash) {
             url += `&pathHash=${pathHash}`;
+        }
+        if (version !== undefined && version !== null && version !== "" && version !== 0) {
+            url += `&v=${encodeURIComponent(String(version))}`;
         }
         return url;
     }, []);

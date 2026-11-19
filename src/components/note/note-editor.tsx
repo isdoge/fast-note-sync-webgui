@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { useTranslation } from "react-i18next";
 import { Input } from "@/components/ui/input";
 import { hashCode } from "@/lib/utils/hash";
-import { shouldReloadRemote } from "@/lib/realtime/conflict";
+import { replaceFolderPrefix, shouldReloadRemote } from "@/lib/realtime/conflict";
 import { subscribeChangeEvents, useRealtimeStore } from "@/stores/realtime-store";
 import { format } from "date-fns";
 
@@ -183,6 +183,7 @@ export function NoteEditor({
 
     // 记录上一次加载的笔记标识，用于判断是否需要重新加载
     const lastNoteKeyRef = useRef<string>("");
+    const lastNoteVersionRef = useRef<number | undefined>(undefined);
 
     const reloadFromRemote = useCallback((overridePath?: string, overridePathHash?: string) => {
         if (saveTimerRef.current) {
@@ -234,10 +235,12 @@ export function NoteEditor({
 
         const requestId = ++loadRequestRef.current;
         if (note) {
-            activeTargetRef.current = { path: note.path, pathHash: note.pathHash };
-            updatePath(note.path.replace(/\.md$/, ""));
+            const targetPath = activeTargetRef.current?.path || note.path;
+            const targetPathHash = activeTargetRef.current?.pathHash || note.pathHash;
+            activeTargetRef.current = { path: targetPath, pathHash: targetPathHash };
+            updatePath(targetPath.replace(/\.md$/, ""));
             setLoading(true);
-            handleGetNote(vault, note.path, note.pathHash, isRecycle, (data) => {
+            handleGetNote(vault, targetPath, targetPathHash, isRecycle, (data) => {
                 // stale response 保护：丢弃过期请求的响应
                 if (requestId !== loadRequestRef.current) return;
                 activeTargetRef.current = { path: data.path, pathHash: data.pathHash };
@@ -263,22 +266,29 @@ export function NoteEditor({
         }
     }, [note, vault, handleGetNote, isRecycle, updatePath, doSave, defaultFolderPath]);
 
-    // 当 note 关键信息变化时进行加载（若已通过远端重命名就地更新过则不重复加载）
+    // 当 note 关键信息变化时进行加载（若已通过远端重命名就地更新过则不重复加载；若 version 变化则从远端重载）
     useEffect(() => {
-        const currentKey = note ? `${note.id}-${note.pathHash}-${note.path}` : "new-note";
+        const nextVersion = note?.version ?? 0;
+        const currentKey = note ? `${note.id}-${note.pathHash}-${note.path}-${nextVersion}` : "new-note";
         if (currentKey !== lastNoteKeyRef.current) {
+            const prevVersion = lastNoteVersionRef.current;
             lastNoteKeyRef.current = currentKey;
+            lastNoteVersionRef.current = note ? nextVersion : undefined;
             if (
                 note &&
                 originalNoteRef.current &&
                 originalNoteRef.current.pathHash === note.pathHash &&
                 originalNoteRef.current.path === note.path
             ) {
+                if (prevVersion !== undefined && prevVersion !== nextVersion) {
+                    reloadFromRemote(note.path, note.pathHash);
+                }
                 return;
             }
+            activeTargetRef.current = note ? { path: note.path, pathHash: note.pathHash } : null;
             loadNote();
         }
-    }, [note, loadNote]);
+    }, [note, loadNote, reloadFromRemote]);
 
     // 下载当前编辑/查看的 Markdown 笔记源文件 / Download the current Markdown note source file
     const handleDownload = useCallback(() => {
@@ -432,8 +442,12 @@ export function NoteEditor({
             }
 
             if (decision === "renamed") {
-                const newFullPath = event.path || activePath;
-                const newPathHash = event.pathHash || hashCode(newFullPath);
+                const newFullPath = event.action === "FolderSyncRename"
+                    ? (replaceFolderPrefix(activePath, event.oldPath, event.path) || activePath)
+                    : (event.path || activePath);
+                const newPathHash = event.action === "FolderSyncRename"
+                    ? hashCode(newFullPath)
+                    : (event.pathHash || hashCode(newFullPath));
                 activeTargetRef.current = { path: newFullPath, pathHash: newPathHash };
                 updatePath(newFullPath.replace(/\.md$/, ""));
                 if (originalNoteRef.current) {
@@ -548,7 +562,7 @@ export function NoteEditor({
             vault,
             oldPath: oldFullPath,
             path: newFullPath,
-            oldPathHash: originalNote?.pathHash
+            oldPathHash: activeTargetRef.current?.pathHash ?? originalNoteRef.current?.pathHash ?? originalNote?.pathHash
         }, () => {
             savingRef.current = false;
             setSaving(false);
@@ -556,21 +570,28 @@ export function NoteEditor({
             setIsEditingTitle(false);
             setLastSavedAt(new Date());
 
+            const newPathHash = hashCode(newFullPath);
+            activeTargetRef.current = { path: newFullPath, pathHash: newPathHash };
+
             // 重要：刷新 originalNote 信息，确保后续保存使用新路径
             // Important: refresh originalNote info to ensure subsequent saves use the new path
-            if (originalNote) {
-                setOriginalNote({
-                    ...originalNote,
+            const currentOriginal = originalNoteRef.current;
+            if (currentOriginal) {
+                const updatedOriginal = {
+                    ...currentOriginal,
                     path: newFullPath,
-                    pathHash: hashCode(newFullPath)
-                });
+                    pathHash: newPathHash
+                };
+                originalNoteRef.current = updatedOriginal;
+                setOriginalNote(updatedOriginal);
             }
 
             // 通知父组件路径变化
             // Notify parent component of path change
-            onSaveSuccess(newFullPath, hashCode(newFullPath));
+            onRemoteRename?.(newFullPath, newPathHash);
+            onSaveSuccess(newFullPath, newPathHash);
         });
-    }, [editingTitleValue, path, folder, vault, originalNote, handleRenameNote, updatePath, isNewNote, onSaveSuccess, cancelEditingTitle]);
+    }, [editingTitleValue, path, folder, vault, originalNote, handleRenameNote, updatePath, isNewNote, onRemoteRename, onSaveSuccess, cancelEditingTitle]);
 
     const handleTitleKeyDown = useCallback((e: React.KeyboardEvent) => {
         if (e.key === "Enter") {
@@ -771,6 +792,7 @@ export function NoteEditor({
                                 onClick={loadNote}
                                 variant="outline"
                                 size="icon"
+                                aria-label={t("ui.common.refresh")}
                                 className="rounded-lg sm:rounded-xl h-7 w-7 sm:h-10 sm:w-10"
                             >
                                 <RefreshCcw className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${loading ? "animate-spin" : ""}`} />

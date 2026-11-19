@@ -9,6 +9,7 @@ import { File } from "@/lib/types/file";
 import {
     decodeTextPreviewBuffer,
     getFileCategory,
+    getFileExtension,
     isTextPreviewCategory,
     MAX_TEXT_PREVIEW_BYTES,
 } from "@/lib/utils/file-preview";
@@ -21,6 +22,21 @@ interface FilePreviewProps {
 }
 
 type TextPreviewStatus = "idle" | "loading" | "ready" | "too_large" | "binary" | "error";
+
+function isApiErrorJsonPayload(text: string): boolean {
+    try {
+        const parsed = JSON.parse(text) as { status?: unknown; code?: unknown } | null;
+        return Boolean(
+            parsed &&
+            typeof parsed === "object" &&
+            !Array.isArray(parsed) &&
+            parsed.status === false &&
+            typeof parsed.code === "number"
+        );
+    } catch {
+        return false;
+    }
+}
 
 async function readResponseUpTo(response: Response, maxBytes: number): Promise<ArrayBuffer | null> {
     if (response.body && typeof response.body.getReader === "function") {
@@ -74,6 +90,7 @@ export function FilePreview({ file, url, onClose }: FilePreviewProps) {
     const isTextPreview = isTextPreviewCategory(category);
 
     const fileName = file.path.split('/').pop() || file.path;
+    const fileExt = getFileExtension(file.path);
     const mediaRef = useRef<HTMLMediaElement>(null);
     const [isLoading, setIsLoading] = useState(isImage || isAudio || isVideo || isTextPreview);
     const [textContent, setTextContent] = useState("");
@@ -107,6 +124,23 @@ export function FilePreview({ file, url, onClose }: FilePreviewProps) {
                     throw new Error(`HTTP ${response.status}`);
                 }
 
+                const contentType = response.headers?.get?.("content-type")?.toLowerCase() ?? "";
+                const isJsonResponse = contentType.includes("application/json");
+                const hasAttachmentHeaders = Boolean(
+                    response.headers?.get?.("etag") ||
+                    response.headers?.get?.("last-modified") ||
+                    response.headers?.get?.("content-disposition") ||
+                    response.headers?.get?.("cache-control")?.includes("max-age=")
+                );
+
+                if (isJsonResponse && !hasAttachmentHeaders && fileExt !== "json") {
+                    if (!controller.signal.aborted) {
+                        setTextStatus("error");
+                        setIsLoading(false);
+                    }
+                    return;
+                }
+
                 const contentLengthHeader = response.headers?.get?.("content-length");
                 if (contentLengthHeader) {
                     const contentLength = Number(contentLengthHeader);
@@ -132,6 +166,10 @@ export function FilePreview({ file, url, onClose }: FilePreviewProps) {
                 if (controller.signal.aborted) return;
 
                 if (decoded.ok) {
+                    if (isJsonResponse && !hasAttachmentHeaders && isApiErrorJsonPayload(decoded.text)) {
+                        setTextStatus("error");
+                        return;
+                    }
                     setTextContent(decoded.text);
                     setTextStatus("ready");
                 } else {
@@ -154,7 +192,7 @@ export function FilePreview({ file, url, onClose }: FilePreviewProps) {
         return () => {
             controller.abort();
         };
-    }, [url, file.size, isImage, isAudio, isVideo, isTextPreview]);
+    }, [url, file.size, fileExt, isImage, isAudio, isVideo, isTextPreview]);
 
     // 加载记忆的音量
     useEffect(() => {
