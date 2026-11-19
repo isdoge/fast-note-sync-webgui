@@ -172,4 +172,42 @@ describe("sse-client", () => {
 
         client.stop();
     });
+
+    it("ignores visibilitychange and online events during 429 rate-limit backoff until Retry-After expires", async () => {
+        const fetchMock = vi.fn(async () => new Response("", { status: 429, headers: { "Retry-After": "90" } }));
+
+        const client = createSseClient({
+            url: "/api/webgui/events?vault=doge",
+            token: "tok-1",
+            fetchFn: fetchMock as unknown as typeof fetch,
+            random: () => 0,
+            onFrame: () => {},
+        });
+
+        client.start();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(client.getStatus()).toBe("backoff");
+
+        // Tab switch and online event during 90s rate-limit window must not interrupt backoff
+        Object.defineProperty(document, "visibilityState", {
+            configurable: true,
+            get: () => "visible",
+        });
+        document.dispatchEvent(new Event("visibilitychange"));
+        window.dispatchEvent(new Event("online"));
+        await vi.advanceTimersByTimeAsync(0);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(89999);
+        document.dispatchEvent(new Event("visibilitychange"));
+        await vi.advanceTimersByTimeAsync(0);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+
+        // Once Retry-After (90s) expires, scheduled reconnect fires
+        await vi.advanceTimersByTimeAsync(1);
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+
+        client.stop();
+    });
 });
