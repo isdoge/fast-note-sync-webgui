@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { useTranslation } from "react-i18next";
 import { Input } from "@/components/ui/input";
 import { hashCode } from "@/lib/utils/hash";
-import { shouldReloadRemote } from "@/lib/realtime/conflict";
+import { replaceFolderPrefix, shouldReloadRemote } from "@/lib/realtime/conflict";
 import { subscribeChangeEvents, useRealtimeStore } from "@/stores/realtime-store";
 import { format } from "date-fns";
 
@@ -442,8 +442,12 @@ export function NoteEditor({
             }
 
             if (decision === "renamed") {
-                const newFullPath = event.path || activePath;
-                const newPathHash = event.pathHash || hashCode(newFullPath);
+                const newFullPath = event.action === "FolderSyncRename"
+                    ? (replaceFolderPrefix(activePath, event.oldPath, event.path) || activePath)
+                    : (event.path || activePath);
+                const newPathHash = event.action === "FolderSyncRename"
+                    ? hashCode(newFullPath)
+                    : (event.pathHash || hashCode(newFullPath));
                 activeTargetRef.current = { path: newFullPath, pathHash: newPathHash };
                 updatePath(newFullPath.replace(/\.md$/, ""));
                 if (originalNoteRef.current) {

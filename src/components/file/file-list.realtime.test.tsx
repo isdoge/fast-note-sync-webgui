@@ -220,4 +220,115 @@ describe("FileList realtime preview", () => {
             expect(screen.queryByTestId("file-preview-url")).not.toBeInTheDocument();
         });
     });
+
+    it("updates open preview on FolderSyncRename and closes on ancestor FolderSyncDelete", async () => {
+        mocks.handleFolderFiles.mockImplementation((_v: string, _p: string, _ph: string, _pg: number, _ps: number, _sb: string, _so: string, cb: (d: FileListResponse) => void) =>
+            cb({
+                list: [{ path: "a/b/img.png", pathHash: "h-ab-img", contentHash: "c-img", size: 10, ctime: 1, mtime: 1, lastTime: 1 }],
+                pager: { page: 1, pageSize: 10, totalRows: 1, totalPages: 1 },
+            })
+        );
+
+        render(
+            <FileList
+                vault="doge"
+                page={1}
+                setPage={vi.fn()}
+                pageSize={10}
+                setPageSize={vi.fn()}
+                searchKeyword=""
+                setSearchKeyword={vi.fn()}
+                currentPath=""
+                setCurrentPath={vi.fn()}
+                currentPathHash=""
+                setCurrentPathHash={vi.fn()}
+                pathHashMap={{}}
+                setPathHashMap={vi.fn()}
+            />
+        );
+
+        fireEvent.click(await screen.findByText("img.png"));
+        expect(await screen.findByTestId("file-preview-url")).toHaveAttribute("data-path", "a/b/img.png");
+
+        // Folder rename a/b -> x/y
+        act(() => {
+            useRealtimeStore.getState().ingestFrame(
+                {
+                    type: "change",
+                    data: {
+                        v: 1,
+                        vault: "doge",
+                        action: "FolderSyncRename",
+                        path: "x/y",
+                        pathHash: "h-xy",
+                        oldPath: "a/b",
+                        oldPathHash: "h-ab",
+                        contentHash: "",
+                        ctime: 0,
+                        mtime: 0,
+                        updatedTimestamp: 0,
+                        ts: 2000,
+                    },
+                },
+                "doge"
+            );
+        });
+
+        await waitFor(() => {
+            expect(screen.getByTestId("file-preview-url")).toHaveAttribute("data-path", "x/y/img.png");
+        });
+
+        // Non-ancestor delete x/yz does not close
+        act(() => {
+            useRealtimeStore.getState().ingestFrame(
+                {
+                    type: "change",
+                    data: {
+                        v: 1,
+                        vault: "doge",
+                        action: "FolderSyncDelete",
+                        path: "x/yz",
+                        pathHash: "h-xyz",
+                        oldPath: "",
+                        oldPathHash: "",
+                        contentHash: "",
+                        ctime: 0,
+                        mtime: 0,
+                        updatedTimestamp: 0,
+                        ts: 2500,
+                    },
+                },
+                "doge"
+            );
+        });
+        expect(screen.getByTestId("file-preview-url")).toBeInTheDocument();
+
+        // Ancestor delete x/y closes preview
+        act(() => {
+            useRealtimeStore.getState().ingestFrame(
+                {
+                    type: "change",
+                    data: {
+                        v: 1,
+                        vault: "doge",
+                        action: "FolderSyncDelete",
+                        path: "x/y",
+                        pathHash: "h-xy",
+                        oldPath: "",
+                        oldPathHash: "",
+                        contentHash: "",
+                        ctime: 0,
+                        mtime: 0,
+                        updatedTimestamp: 0,
+                        ts: 3000,
+                    },
+                },
+                "doge"
+            );
+        });
+
+        await waitFor(() => {
+            expect(screen.queryByTestId("file-preview-url")).not.toBeInTheDocument();
+        });
+    });
 });

@@ -7,6 +7,9 @@ import { Database } from "lucide-react";
 
 import { toast } from "@/components/common/Toast";
 import { CanvasViewer } from "@/components/note/canvas-viewer";
+import { isFolderAncestor, replaceFolderPrefix } from "@/lib/realtime/conflict";
+import { hashCode } from "@/lib/utils/hash";
+import { subscribeChangeEvents } from "@/stores/realtime-store";
 import { FileList } from "./file-list";
 
 
@@ -46,6 +49,65 @@ export function FileManager({
 
     // Canvas viewer state
     const [canvasFile, setCanvasFile] = useState<{ path: string; pathHash: string } | null>(null);
+    const canvasFileRef = useRef(canvasFile);
+    useEffect(() => {
+        canvasFileRef.current = canvasFile;
+    }, [canvasFile]);
+
+    useEffect(() => {
+        if (isRecycle || !canvasFile) return;
+
+        return subscribeChangeEvents((event) => {
+            const current = canvasFileRef.current;
+            if (!current) return;
+            if (event.vault && event.vault !== vault) return;
+
+            if (event.action === "FileSyncDelete" || event.action === "NoteSyncDelete") {
+                const matched = event.pathHash
+                    ? event.pathHash === current.pathHash
+                    : event.path === current.path;
+                if (matched) {
+                    canvasFileRef.current = null;
+                    toast.warning(t("ui.realtime.remoteDeletedToast", { defaultValue: "The open file was deleted on another device." }));
+                    setCanvasFile(null);
+                }
+                return;
+            }
+
+            if (event.action === "FolderSyncDelete") {
+                if (isFolderAncestor(event.path, current.path)) {
+                    canvasFileRef.current = null;
+                    toast.warning(t("ui.realtime.remoteDeletedToast", { defaultValue: "The open file was deleted on another device." }));
+                    setCanvasFile(null);
+                }
+                return;
+            }
+
+            if (event.action === "FileSyncRename" || event.action === "NoteSyncRename") {
+                const matched = event.oldPathHash
+                    ? event.oldPathHash === current.pathHash
+                    : event.oldPath === current.path;
+                if (matched && event.path) {
+                    const nextPath = event.path;
+                    const nextPathHash = event.pathHash || hashCode(nextPath);
+                    const nextCanvas = { path: nextPath, pathHash: nextPathHash };
+                    canvasFileRef.current = nextCanvas;
+                    setCanvasFile(nextCanvas);
+                }
+                return;
+            }
+
+            if (event.action === "FolderSyncRename" && event.path) {
+                const nextPath = replaceFolderPrefix(current.path, event.oldPath, event.path);
+                if (nextPath) {
+                    const nextPathHash = hashCode(nextPath);
+                    const nextCanvas = { path: nextPath, pathHash: nextPathHash };
+                    canvasFileRef.current = nextCanvas;
+                    setCanvasFile(nextCanvas);
+                }
+            }
+        });
+    }, [isRecycle, canvasFile, vault, t]);
 
     useEffect(() => {
         localStorage.setItem("filePageSize", pageSize.toString());

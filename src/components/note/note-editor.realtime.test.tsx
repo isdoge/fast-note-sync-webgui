@@ -757,4 +757,106 @@ describe("NoteEditor realtime integration", () => {
         await vi.advanceTimersByTimeAsync(2000);
         expect(mocks.handleSaveNote).not.toHaveBeenCalled();
     });
+
+    it("handles FolderSyncRename and FolderSyncDelete with segment-safe ancestor matching", async () => {
+        vi.useFakeTimers();
+        mocks.handleGetNote.mockImplementation(
+            (_v: string, path: string, _ph: string | undefined, _r: boolean, cb: (d: NoteDetail) => void, onSettled?: () => void) => {
+                cb(makeDetail("initial", path));
+                onSettled?.();
+            }
+        );
+
+        const onRemoteRename = vi.fn();
+        render(
+            <NoteEditor
+                vault="doge"
+                note={makeNote("a/b/c.md")}
+                onBack={vi.fn()}
+                onSaveSuccess={vi.fn()}
+                onRemoteRename={onRemoteRename}
+            />
+        );
+
+        await vi.advanceTimersByTimeAsync(0);
+
+        // Non-ancestor folder a/bc must be ignored
+        act(() => {
+            useRealtimeStore.getState().ingestFrame(
+                {
+                    type: "change",
+                    data: {
+                        v: 1,
+                        vault: "doge",
+                        action: "FolderSyncDelete",
+                        path: "a/bc",
+                        pathHash: hashCode("a/bc"),
+                        oldPath: "",
+                        oldPathHash: "",
+                        contentHash: "",
+                        ctime: 0,
+                        mtime: 0,
+                        updatedTimestamp: 0,
+                        ts: 1000,
+                    },
+                },
+                "doge"
+            );
+        });
+        expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+        // Ancestor folder rename a/b -> x/y updates open note path to x/y/c.md
+        act(() => {
+            useRealtimeStore.getState().ingestFrame(
+                {
+                    type: "change",
+                    data: {
+                        v: 1,
+                        vault: "doge",
+                        action: "FolderSyncRename",
+                        path: "x/y",
+                        pathHash: hashCode("x/y"),
+                        oldPath: "a/b",
+                        oldPathHash: hashCode("a/b"),
+                        contentHash: "",
+                        ctime: 0,
+                        mtime: 0,
+                        updatedTimestamp: 0,
+                        ts: 2000,
+                    },
+                },
+                "doge"
+            );
+        });
+        expect(onRemoteRename).toHaveBeenCalledWith("x/y/c.md", hashCode("x/y/c.md"));
+
+        // Local unsaved edit, then ancestor folder x/y deleted -> stops autosave and shows alert
+        fireEvent.change(screen.getByTestId("mock-markdown-editor"), { target: { value: "unsaved edit" } });
+        act(() => {
+            useRealtimeStore.getState().ingestFrame(
+                {
+                    type: "change",
+                    data: {
+                        v: 1,
+                        vault: "doge",
+                        action: "FolderSyncDelete",
+                        path: "x/y",
+                        pathHash: hashCode("x/y"),
+                        oldPath: "",
+                        oldPathHash: "",
+                        contentHash: "",
+                        ctime: 0,
+                        mtime: 0,
+                        updatedTimestamp: 0,
+                        ts: 3000,
+                    },
+                },
+                "doge"
+            );
+        });
+        expect(screen.getByRole("alert")).toBeInTheDocument();
+
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(mocks.handleSaveNote).not.toHaveBeenCalled();
+    });
 });

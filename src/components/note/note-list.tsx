@@ -9,7 +9,9 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useAppStore } from "@/stores/app-store";
+import { isFolderAncestor, replaceFolderPrefix } from "@/lib/realtime/conflict";
 import { subscribeChangeEvents, useRealtimeStore } from "@/stores/realtime-store";
+import { hashCode } from "@/lib/utils/hash";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "react-i18next";
 import { VaultType } from "@/lib/types/vault";
@@ -624,6 +626,15 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
                 return;
             }
 
+            if (event.action === "FolderSyncDelete" && !isRecycle) {
+                if (isFolderAncestor(event.path, currentPreview.path)) {
+                    previewFileRef.current = null;
+                    setPreviewFile(null);
+                    setPreviewUrl("");
+                }
+                return;
+            }
+
             if (event.action === "FileSyncRename") {
                 const matched = event.oldPathHash
                     ? event.oldPathHash === currentPreview.pathHash
@@ -639,6 +650,27 @@ export function NoteList({ vault, vaults, onVaultChange, onSelectNote, onCreateN
                         mtime: event.mtime || currentPreview.mtime,
                     };
                     let url = getRawFileUrl(vault, nextPath, nextPathHash?.toString(), updatedFile.contentHash || updatedFile.mtime);
+                    if (isRecycle) {
+                        url += (url.includes("?") ? "&" : "?") + "isRecycle=1";
+                    }
+                    const sep = url.includes("?") ? "&" : "?";
+                    previewFileRef.current = updatedFile;
+                    setPreviewFile(updatedFile);
+                    setPreviewUrl(`${url}${sep}_=${Date.now()}_${seq}`);
+                }
+                return;
+            }
+
+            if (event.action === "FolderSyncRename" && event.path) {
+                const nextPath = replaceFolderPrefix(currentPreview.path, event.oldPath, event.path);
+                if (nextPath) {
+                    const nextPathHash = hashCode(nextPath);
+                    const updatedFile: FileDTO = {
+                        ...currentPreview,
+                        path: nextPath,
+                        pathHash: nextPathHash,
+                    };
+                    let url = getRawFileUrl(vault, nextPath, nextPathHash, updatedFile.contentHash || updatedFile.mtime);
                     if (isRecycle) {
                         url += (url.includes("?") ? "&" : "?") + "isRecycle=1";
                     }

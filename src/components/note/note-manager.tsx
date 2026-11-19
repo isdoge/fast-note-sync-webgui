@@ -21,6 +21,7 @@ import { CanvasViewer } from "./canvas-viewer";
 import { NoteList } from "./note-list";
 import { NoteTreeSidebar } from "./note-tree-sidebar";
 import { useAppStore } from "@/stores/app-store";
+import { isFolderAncestor, replaceFolderPrefix } from "@/lib/realtime/conflict";
 import { subscribeChangeEvents } from "@/stores/realtime-store";
 import { TocProvider } from "@/components/context/toc-context";
 import { useMobile } from "@/hooks/use-mobile";
@@ -362,6 +363,16 @@ export function NoteManager({
                 return;
             }
 
+            if (event.action === "FolderSyncDelete") {
+                if (isFolderAncestor(event.path, currentNote.path)) {
+                    selectedNoteRef.current = undefined;
+                    toast.warning(t("ui.realtime.remoteDeletedToast", { defaultValue: "The open file was deleted on another device." }));
+                    setSelectedNote(undefined);
+                    setView("list");
+                }
+                return;
+            }
+
             if (isRenameAction) {
                 const matched = event.oldPathHash
                     ? event.oldPathHash === currentNote.pathHash
@@ -369,6 +380,17 @@ export function NoteManager({
                 if (matched && event.path) {
                     const nextPath = event.path;
                     const nextPathHash = event.pathHash || hashCode(nextPath);
+                    const nextNote = { ...currentNote, path: nextPath, pathHash: nextPathHash };
+                    selectedNoteRef.current = nextNote;
+                    setSelectedNote(nextNote);
+                }
+                return;
+            }
+
+            if (event.action === "FolderSyncRename" && event.path) {
+                const nextPath = replaceFolderPrefix(currentNote.path, event.oldPath, event.path);
+                if (nextPath) {
+                    const nextPathHash = hashCode(nextPath);
                     const nextNote = { ...currentNote, path: nextPath, pathHash: nextPathHash };
                     selectedNoteRef.current = nextNote;
                     setSelectedNote(nextNote);

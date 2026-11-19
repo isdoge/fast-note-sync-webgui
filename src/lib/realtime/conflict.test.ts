@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { isSelfWriteEcho, shouldReloadRemote, type SelfWriteRecord } from "./conflict";
+import {
+    isFolderAncestor,
+    isSelfWriteEcho,
+    replaceFolderPrefix,
+    shouldReloadRemote,
+    type SelfWriteRecord,
+} from "./conflict";
 import type { RealtimeChangeEvent } from "./types";
 
 function makeEvent(overrides: Partial<RealtimeChangeEvent> = {}): RealtimeChangeEvent {
@@ -118,6 +124,59 @@ describe("realtime conflict & self-write echo detection", () => {
                 {
                     notePath: "notes/hello.md",
                     notePathHash: "hash-hello",
+                    currentContentHash: "ch-1",
+                    hasPendingChanges: false,
+                    selfWrites: [],
+                }
+            )
+        ).toBe("renamed");
+    });
+
+    it("matches FolderSyncDelete and FolderSyncRename by segment-safe ancestor path", () => {
+        expect(isFolderAncestor("a/b", "a/b/c.md")).toBe(true);
+        expect(isFolderAncestor("a/b", "a/bc.md")).toBe(false);
+        expect(isFolderAncestor("a/b/", "a/b/sub/c.md")).toBe(true);
+        expect(replaceFolderPrefix("a/b/c.md", "a/b", "x/y")).toBe("x/y/c.md");
+        expect(replaceFolderPrefix("a/bc.md", "a/b", "x/y")).toBeNull();
+
+        expect(
+            shouldReloadRemote(
+                makeEvent({ action: "FolderSyncDelete", path: "a/b", pathHash: "h-folder" }),
+                {
+                    notePath: "a/b/c.md",
+                    notePathHash: "h-c",
+                    currentContentHash: "ch-1",
+                    hasPendingChanges: true,
+                    selfWrites: [],
+                }
+            )
+        ).toBe("deleted");
+
+        expect(
+            shouldReloadRemote(
+                makeEvent({ action: "FolderSyncDelete", path: "a/b", pathHash: "h-folder" }),
+                {
+                    notePath: "a/bc.md",
+                    notePathHash: "h-bc",
+                    currentContentHash: "ch-1",
+                    hasPendingChanges: true,
+                    selfWrites: [],
+                }
+            )
+        ).toBe("ignore");
+
+        expect(
+            shouldReloadRemote(
+                makeEvent({
+                    action: "FolderSyncRename",
+                    path: "x/y",
+                    pathHash: "h-xy",
+                    oldPath: "a/b",
+                    oldPathHash: "h-ab",
+                }),
+                {
+                    notePath: "a/b/c.md",
+                    notePathHash: "h-c",
                     currentContentHash: "ch-1",
                     hasPendingChanges: false,
                     selfWrites: [],

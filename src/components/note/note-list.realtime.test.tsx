@@ -321,4 +321,72 @@ describe("NoteList realtime scopes (shares, files, trash)", () => {
         );
         expect(screen.queryByTestId("file-preview-url")).not.toBeInTheDocument();
     });
+
+    it("updates open preview on FolderSyncRename and closes on ancestor FolderSyncDelete in NoteList", async () => {
+        mocks.handleFileList.mockImplementation((_v: string, _pg: number, _ps: number, _r: boolean, _kw: string, _sb: string, _so: string, cb: (d: FileListResponse) => void) =>
+            cb({
+                list: [{ path: "a/b/doc.png", pathHash: "h-ab-doc", contentHash: "c-doc", size: 10, ctime: 1, mtime: 1, lastTime: 1 }],
+                pager: { page: 1, pageSize: 10, totalRows: 1, totalPages: 1 },
+            })
+        );
+
+        render(<Harness initialViewMode="flat-file" />);
+
+        fireEvent.click(await screen.findByText("a/b/doc.png"));
+        expect(await screen.findByTestId("file-preview-url")).toHaveAttribute("data-path", "a/b/doc.png");
+
+        act(() => {
+            useRealtimeStore.getState().ingestFrame(
+                {
+                    type: "change",
+                    data: {
+                        v: 1,
+                        vault: "doge",
+                        action: "FolderSyncRename",
+                        path: "x/y",
+                        pathHash: "h-xy",
+                        oldPath: "a/b",
+                        oldPathHash: "h-ab",
+                        contentHash: "",
+                        ctime: 0,
+                        mtime: 0,
+                        updatedTimestamp: 0,
+                        ts: 2000,
+                    },
+                },
+                "doge"
+            );
+        });
+
+        await waitFor(() => {
+            expect(screen.getByTestId("file-preview-url")).toHaveAttribute("data-path", "x/y/doc.png");
+        });
+
+        act(() => {
+            useRealtimeStore.getState().ingestFrame(
+                {
+                    type: "change",
+                    data: {
+                        v: 1,
+                        vault: "doge",
+                        action: "FolderSyncDelete",
+                        path: "x/y",
+                        pathHash: "h-xy",
+                        oldPath: "",
+                        oldPathHash: "",
+                        contentHash: "",
+                        ctime: 0,
+                        mtime: 0,
+                        updatedTimestamp: 0,
+                        ts: 3000,
+                    },
+                },
+                "doge"
+            );
+        });
+
+        await waitFor(() => {
+            expect(screen.queryByTestId("file-preview-url")).not.toBeInTheDocument();
+        });
+    });
 });
