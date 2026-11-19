@@ -226,4 +226,19 @@ describe("realtime-store", () => {
         expect(receivedAfterReset).toEqual([{ path: "fresh.md", seq: 1 }]);
         unsubAfterReset();
     });
+
+    it("clears selfWrites when switching to another vault while preserving on same-vault call", () => {
+        const store = useRealtimeStore.getState();
+        store.setActiveVault("vaultA");
+        store.markSelfWrite("h-readme", "ch-1", 1000, "README.md");
+        expect(useRealtimeStore.getState().selfWrites).toHaveLength(1);
+
+        // Calling setActiveVault with the same vault must not wipe in-flight self-write records
+        store.setActiveVault("vaultA");
+        expect(useRealtimeStore.getState().selfWrites).toHaveLength(1);
+
+        // Switching to another vault clears selfWrites so same-path notes in vaultB are not suppressed
+        store.setActiveVault("vaultB");
+        expect(useRealtimeStore.getState().selfWrites).toEqual([]);
+    });
 });
