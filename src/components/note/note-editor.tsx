@@ -183,6 +183,7 @@ export function NoteEditor({
 
     // 记录上一次加载的笔记标识，用于判断是否需要重新加载
     const lastNoteKeyRef = useRef<string>("");
+    const lastNoteVersionRef = useRef<number | undefined>(undefined);
 
     const reloadFromRemote = useCallback((overridePath?: string, overridePathHash?: string) => {
         if (saveTimerRef.current) {
@@ -265,23 +266,29 @@ export function NoteEditor({
         }
     }, [note, vault, handleGetNote, isRecycle, updatePath, doSave, defaultFolderPath]);
 
-    // 当 note 关键信息变化时进行加载（若已通过远端重命名就地更新过则不重复加载）
+    // 当 note 关键信息变化时进行加载（若已通过远端重命名就地更新过则不重复加载；若 version 变化则从远端重载）
     useEffect(() => {
-        const currentKey = note ? `${note.id}-${note.pathHash}-${note.path}` : "new-note";
+        const nextVersion = note?.version ?? 0;
+        const currentKey = note ? `${note.id}-${note.pathHash}-${note.path}-${nextVersion}` : "new-note";
         if (currentKey !== lastNoteKeyRef.current) {
+            const prevVersion = lastNoteVersionRef.current;
             lastNoteKeyRef.current = currentKey;
+            lastNoteVersionRef.current = note ? nextVersion : undefined;
             if (
                 note &&
                 originalNoteRef.current &&
                 originalNoteRef.current.pathHash === note.pathHash &&
                 originalNoteRef.current.path === note.path
             ) {
+                if (prevVersion !== undefined && prevVersion !== nextVersion) {
+                    reloadFromRemote(note.path, note.pathHash);
+                }
                 return;
             }
             activeTargetRef.current = note ? { path: note.path, pathHash: note.pathHash } : null;
             loadNote();
         }
-    }, [note, loadNote]);
+    }, [note, loadNote, reloadFromRemote]);
 
     // 下载当前编辑/查看的 Markdown 笔记源文件 / Download the current Markdown note source file
     const handleDownload = useCallback(() => {

@@ -711,4 +711,50 @@ describe("NoteEditor realtime integration", () => {
         await vi.advanceTimersByTimeAsync(0);
         expect(screen.getByTestId("mock-markdown-editor")).toHaveValue("remote after rename");
     });
+
+    it("reloads restored content and cancels pending autosave when note.version increments after history restore", async () => {
+        vi.useFakeTimers();
+        let serverContent = "current content";
+        mocks.handleGetNote.mockImplementation(
+            (_v: string, path: string, _ph: string | undefined, _r: boolean, cb: (d: NoteDetail) => void, onSettled?: () => void) => {
+                cb(makeDetail(serverContent, path));
+                onSettled?.();
+            }
+        );
+
+        const initialNote = makeNote("docs/demo.md");
+        const { rerender } = render(
+            <NoteEditor
+                vault="doge"
+                note={initialNote}
+                onBack={vi.fn()}
+                onSaveSuccess={vi.fn()}
+            />
+        );
+
+        await vi.advanceTimersByTimeAsync(0);
+        const editor = screen.getByTestId("mock-markdown-editor");
+        expect(editor).toHaveValue("current content");
+
+        // Local unsaved edit starts autosave debounce timer
+        fireEvent.change(editor, { target: { value: "unsaved edit before restore" } });
+
+        // Simulate NoteManager.handleHistoryRestoreSuccess incrementing note.version
+        serverContent = "restored historical content";
+        rerender(
+            <NoteEditor
+                vault="doge"
+                note={{ ...initialNote, version: (initialNote.version || 0) + 1 }}
+                onBack={vi.fn()}
+                onSaveSuccess={vi.fn()}
+            />
+        );
+
+        await vi.advanceTimersByTimeAsync(0);
+        expect(screen.getByTestId("mock-markdown-editor")).toHaveValue("restored historical content");
+
+        // Pending autosave must have been cancelled so restored version is not overwritten
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(mocks.handleSaveNote).not.toHaveBeenCalled();
+    });
 });
