@@ -16,6 +16,12 @@ export interface GitSyncConfigDTO {
     lastMessage: string
     includeConfig: boolean
     configSyncRules: string[]
+    sourceDir?: string
+    targetSubdir?: string
+    requireFrontmatter?: string
+    validateFrontmatter?: boolean
+    bundleAssets?: boolean
+    webhookUrl?: string
     updatedAt: string
 }
 
@@ -34,6 +40,12 @@ export interface GitSyncConfigRequest {
     isEnabled: boolean
     includeConfig: boolean
     configSyncRules: string[]
+    sourceDir?: string
+    targetSubdir?: string
+    requireFrontmatter?: string
+    validateFrontmatter?: boolean
+    bundleAssets?: boolean
+    webhookUrl?: string
 }
 
 /**
