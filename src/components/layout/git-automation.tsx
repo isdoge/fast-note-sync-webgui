@@ -7,6 +7,7 @@ import { GitConfigForm } from "@/components/layout/git-config-form";
 import { useGitHandle } from "@/components/api-handle/git-handle";
 import { useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { useTranslation } from "react-i18next";
 import { VaultType } from "@/lib/types/vault";
 import { cn } from "@/lib/utils";
@@ -223,6 +224,16 @@ export function GitAutomation() {
                                                     <span className="text-[12px] px-1.5 py-0.5 bg-accent rounded font-mono text-muted-foreground">
                                                         {config.branch}
                                                     </span>
+                                                    {config.targetSubdir && (
+                                                        <Badge variant="secondary" className="text-[11px] px-2 py-0 font-mono font-normal bg-primary/10 text-primary border-primary/20">
+                                                            {`${config.sourceDir || "/"} → ${config.targetSubdir}`}
+                                                        </Badge>
+                                                    )}
+                                                    {config.requireFrontmatter && (
+                                                        <Badge variant="outline" className="text-[11px] px-2 py-0 font-mono font-normal text-muted-foreground">
+                                                            {config.requireFrontmatter}
+                                                        </Badge>
+                                                    )}
                                                 </div>
                                                 {(() => {
                                                     const safeRepoUrl = getSafeHttpUrl(config.repoUrl);
@@ -308,11 +319,27 @@ export function GitAutomation() {
                                             </span>
                                         </div>
                                     </div>
-                                    {config.lastMessage && config.lastStatus === 3 && (
-                                        <p className="mt-2 p-2 bg-destructive/5 text-destructive border border-destructive/10 rounded-md text-[10px] leading-relaxed">
-                                            {config.lastMessage}
-                                        </p>
-                                    )}
+                                    {config.lastMessage && (() => {
+                                        const isError = config.lastStatus === 3;
+                                        const isWarning = !isError && /warn|warning|skip|跳过|警告/i.test(config.lastMessage);
+                                        const isDeployReceipt = !isError && /preview deployed:|unified preview deployed:/i.test(config.lastMessage);
+                                        return (
+                                            <p
+                                                className={cn(
+                                                    "mt-2 p-2 rounded-md border text-[11px] leading-relaxed break-words whitespace-pre-wrap",
+                                                    isError
+                                                        ? "bg-destructive/5 text-destructive border-destructive/15"
+                                                        : isWarning
+                                                            ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20"
+                                                            : isDeployReceipt
+                                                                ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20"
+                                                                : "bg-muted/50 text-muted-foreground border-border/60"
+                                                )}
+                                            >
+                                                {config.lastMessage}
+                                            </p>
+                                        );
+                                    })()}
                                 </div>
                             ))
                         ) : (

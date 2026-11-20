@@ -3,7 +3,7 @@ import type { GitSyncConfigRequest, GitSyncConfigDTO } from "@/lib/types/git";
 import { createGitSyncSchema } from "@/lib/validations/git-sync-schema";
 import { useGitHandle } from "@/components/api-handle/git-handle";
 import { useAppStore } from "@/stores/app-store";
-import { Eye, EyeOff, ShieldCheck, Plus, Trash2 } from "lucide-react";
+import { Eye, EyeOff, ShieldCheck, Plus, Trash2, ChevronDown, ChevronUp, Sparkles } from "lucide-react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -38,6 +38,16 @@ export function GitConfigForm({ config, vaults, onSubmit, onCancel }: GitConfigF
 
     const [showPassword, setShowPassword] = useState(false)
     const [isValidating, setIsValidating] = useState(false)
+    const hasBlogConfig = Boolean(
+        config?.sourceDir ||
+        config?.targetSubdir ||
+        config?.requireFrontmatter ||
+        config?.validateFrontmatter ||
+        config?.bundleAssets ||
+        config?.webhookUrl
+    )
+    const [isBlogSectionOpen, setIsBlogSectionOpen] = useState(hasBlogConfig)
+    const [isFireflyPresetApplied, setIsFireflyPresetApplied] = useState(false)
 
     const schema = useMemo(() => createGitSyncSchema(t), [t])
 
@@ -59,6 +69,12 @@ export function GitConfigForm({ config, vaults, onSubmit, onCancel }: GitConfigF
             retentionDays: config.retentionDays ?? 30,
             includeConfig: config.includeConfig,
             configSyncRules: config.configSyncRules || [],
+            sourceDir: config.sourceDir ?? "",
+            targetSubdir: config.targetSubdir ?? "",
+            requireFrontmatter: config.requireFrontmatter ?? "",
+            validateFrontmatter: config.validateFrontmatter ?? false,
+            bundleAssets: config.bundleAssets ?? false,
+            webhookUrl: config.webhookUrl ?? "",
         } : {
             vault: "",
             isEnabled: true,
@@ -67,9 +83,15 @@ export function GitConfigForm({ config, vaults, onSubmit, onCancel }: GitConfigF
             retentionDays: 30,
             includeConfig: false,
             configSyncRules: DEFAULT_CONFIG_SYNC_RULES,
+            sourceDir: "",
+            targetSubdir: "",
+            requireFrontmatter: "",
+            validateFrontmatter: false,
+            bundleAssets: false,
+            webhookUrl: "",
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    ), [config?.id, config?.vault, config?.repoUrl, config?.branch, config?.username, config?.password, config?.isEnabled, config?.delay, config?.retentionDays, config?.includeConfig, configSyncRulesJson])
+    ), [config?.id, config?.vault, config?.repoUrl, config?.branch, config?.username, config?.password, config?.isEnabled, config?.delay, config?.retentionDays, config?.includeConfig, configSyncRulesJson, config?.sourceDir, config?.targetSubdir, config?.requireFrontmatter, config?.validateFrontmatter, config?.bundleAssets, config?.webhookUrl])
 
     const { register, handleSubmit, formState: { errors, isSubmitting, isDirty }, setValue, getValues, reset, watch, control } = useForm<GitSyncConfigRequest>({
         resolver: zodResolver(schema),
@@ -88,11 +110,28 @@ export function GitConfigForm({ config, vaults, onSubmit, onCancel }: GitConfigF
     const selectedVault = watch("vault")
     const isEnabled = watch("isEnabled")
     const includeConfig = watch("includeConfig")
+    const validateFrontmatter = watch("validateFrontmatter")
+    const bundleAssets = watch("bundleAssets")
+    const targetSubdir = watch("targetSubdir")
 
     useEffect(() => {
         reset(defaultValues)
         setShowPassword(false)
-    }, [defaultValues, reset])
+        setIsBlogSectionOpen(hasBlogConfig)
+        setIsFireflyPresetApplied(false)
+    }, [defaultValues, reset, hasBlogConfig])
+
+    const handleApplyFireflyPreset = useCallback(() => {
+        setValue("branch", "master", { shouldDirty: true, shouldValidate: true })
+        setValue("targetSubdir", "src/content/posts/经验分享", { shouldDirty: true, shouldValidate: true })
+        setValue("requireFrontmatter", "type=share", { shouldDirty: true, shouldValidate: true })
+        setValue("validateFrontmatter", true, { shouldDirty: true, shouldValidate: true })
+        setValue("bundleAssets", true, { shouldDirty: true, shouldValidate: true })
+        setValue("delay", 60, { shouldDirty: true, shouldValidate: true })
+        setValue("includeConfig", false, { shouldDirty: true, shouldValidate: true })
+        setIsBlogSectionOpen(true)
+        setIsFireflyPresetApplied(true)
+    }, [setValue])
 
     const handleCancel = useCallback(() => {
         reset(defaultValues)
@@ -152,7 +191,13 @@ export function GitConfigForm({ config, vaults, onSubmit, onCancel }: GitConfigF
                 {/* 仓库协议地址 */}
                 <div className="md:col-span-2 space-y-1.5">
                     <Label htmlFor="repoUrl" className="text-xs font-semibold text-muted-foreground ml-1">{t("ui.git.repoUrl")}</Label>
-                    <Input id="repoUrl" placeholder="https://github.com/user/repo.git" autoComplete="off" className="bg-background border-input" {...register("repoUrl")} />
+                    <Input
+                        id="repoUrl"
+                        placeholder={isFireflyPresetApplied || Boolean(targetSubdir) ? "http://127.0.0.1:4323/blog.git" : "https://github.com/user/repo.git"}
+                        autoComplete="off"
+                        className="bg-background border-input"
+                        {...register("repoUrl")}
+                    />
                     {errors.repoUrl && <p className="text-[11px] text-destructive mt-1 ml-1">{errors.repoUrl.message}</p>}
                 </div>
 
@@ -207,6 +252,146 @@ export function GitConfigForm({ config, vaults, onSubmit, onCancel }: GitConfigF
                     <p className="text-[10px] text-muted-foreground ml-1">{t("ui.git.retentionDaysDesc")}</p>
                     {errors.retentionDays && <p className="text-[11px] text-destructive mt-1 ml-1">{errors.retentionDays.message}</p>}
                 </div>
+            </div>
+
+            {/* 子目录映射与博客自动发布（Astro / Firefly） */}
+            <div className="rounded-xl border border-border/70 bg-background/60 p-3.5 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <button
+                        type="button"
+                        aria-expanded={isBlogSectionOpen}
+                        onClick={() => setIsBlogSectionOpen((prev) => !prev)}
+                        className="flex items-center gap-2 text-left group"
+                    >
+                        {isBlogSectionOpen ? (
+                            <ChevronUp className="h-4 w-4 text-muted-foreground group-hover:text-foreground shrink-0" />
+                        ) : (
+                            <ChevronDown className="h-4 w-4 text-muted-foreground group-hover:text-foreground shrink-0" />
+                        )}
+                        <div>
+                            <span className="text-sm font-semibold text-foreground">{t("ui.git.form.blogPublishTitle")}</span>
+                            <p className="text-[11px] text-muted-foreground">{t("ui.git.form.blogPublishDesc")}</p>
+                        </div>
+                    </button>
+                    <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={handleApplyFireflyPreset}
+                        className="h-8 text-xs shrink-0 self-start sm:self-center border border-primary/20 bg-primary/10 text-primary hover:bg-primary/20"
+                    >
+                        <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                        {t("ui.git.form.applyFireflyPreset")}
+                    </Button>
+                </div>
+
+                {isBlogSectionOpen && (
+                    <div className="space-y-4 pt-3 border-t border-border/50 animate-in fade-in slide-in-from-top-1 duration-200">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
+                            {/* 源目录前缀 */}
+                            <div className="space-y-1.5">
+                                <Label htmlFor="sourceDir" className="text-xs font-semibold text-muted-foreground ml-1">
+                                    {t("ui.git.form.sourceDir")}
+                                </Label>
+                                <Input
+                                    id="sourceDir"
+                                    autoComplete="off"
+                                    placeholder={t("ui.git.form.sourceDirPlaceholder")}
+                                    className="bg-background border-input"
+                                    {...register("sourceDir")}
+                                />
+                                <p className="text-[10px] text-muted-foreground ml-1">{t("ui.git.form.sourceDirDesc")}</p>
+                                {errors.sourceDir && <p className="text-[11px] text-destructive mt-1 ml-1">{errors.sourceDir.message}</p>}
+                            </div>
+
+                            {/* 目标仓库子目录沙箱 */}
+                            <div className="space-y-1.5">
+                                <Label htmlFor="targetSubdir" className="text-xs font-semibold text-muted-foreground ml-1">
+                                    {t("ui.git.form.targetSubdir")}
+                                </Label>
+                                <Input
+                                    id="targetSubdir"
+                                    autoComplete="off"
+                                    placeholder={t("ui.git.form.targetSubdirPlaceholder")}
+                                    className="bg-background border-input"
+                                    {...register("targetSubdir")}
+                                />
+                                <p className="text-[10px] text-muted-foreground ml-1">{t("ui.git.form.targetSubdirDesc")}</p>
+                                {errors.targetSubdir && <p className="text-[11px] text-destructive mt-1 ml-1">{errors.targetSubdir.message}</p>}
+                            </div>
+
+                            {/* Frontmatter 过滤条件 */}
+                            <div className="space-y-1.5">
+                                <Label htmlFor="requireFrontmatter" className="text-xs font-semibold text-muted-foreground ml-1">
+                                    {t("ui.git.form.requireFrontmatter")}
+                                </Label>
+                                <Input
+                                    id="requireFrontmatter"
+                                    autoComplete="off"
+                                    placeholder={t("ui.git.form.requireFrontmatterPlaceholder")}
+                                    className="bg-background border-input"
+                                    {...register("requireFrontmatter")}
+                                />
+                                <p className="text-[10px] text-muted-foreground ml-1">{t("ui.git.form.requireFrontmatterDesc")}</p>
+                                {errors.requireFrontmatter && <p className="text-[11px] text-destructive mt-1 ml-1">{errors.requireFrontmatter.message}</p>}
+                            </div>
+
+                            {/* 构建重试 Webhook 地址 */}
+                            <div className="space-y-1.5">
+                                <Label htmlFor="webhookUrl" className="text-xs font-semibold text-muted-foreground ml-1">
+                                    {t("ui.git.form.webhookUrl")}
+                                </Label>
+                                <Input
+                                    id="webhookUrl"
+                                    autoComplete="off"
+                                    placeholder={t("ui.git.form.webhookUrlPlaceholder")}
+                                    className="bg-background border-input"
+                                    {...register("webhookUrl")}
+                                />
+                                <p className="text-[10px] text-muted-foreground ml-1">{t("ui.git.form.webhookUrlDesc")}</p>
+                                {errors.webhookUrl && <p className="text-[11px] text-destructive mt-1 ml-1">{errors.webhookUrl.message}</p>}
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                            {/* Astro Firefly 预检守卫 */}
+                            <div className="flex items-start space-x-2.5 rounded-lg border border-border/50 bg-muted/20 p-2.5">
+                                <Checkbox
+                                    id="validateFrontmatter"
+                                    checked={Boolean(validateFrontmatter)}
+                                    onCheckedChange={(checked) => setValue("validateFrontmatter", Boolean(checked), { shouldDirty: true, shouldValidate: true })}
+                                    className="mt-0.5 border-input data-[state=checked]:bg-primary data-[state=checked]:border-primary"
+                                />
+                                <div className="space-y-0.5">
+                                    <Label htmlFor="validateFrontmatter" className="text-xs font-semibold cursor-pointer">
+                                        {t("ui.git.form.validateFrontmatter")}
+                                    </Label>
+                                    <p className="text-[10px] text-muted-foreground leading-snug">
+                                        {t("ui.git.form.validateFrontmatterDesc")}
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* 自动汇聚跨目录引用附件 */}
+                            <div className="flex items-start space-x-2.5 rounded-lg border border-border/50 bg-muted/20 p-2.5">
+                                <Checkbox
+                                    id="bundleAssets"
+                                    checked={Boolean(bundleAssets)}
+                                    onCheckedChange={(checked) => setValue("bundleAssets", Boolean(checked), { shouldDirty: true, shouldValidate: true })}
+                                    className="mt-0.5 border-input data-[state=checked]:bg-primary data-[state=checked]:border-primary"
+                                />
+                                <div className="space-y-0.5">
+                                    <Label htmlFor="bundleAssets" className="text-xs font-semibold cursor-pointer">
+                                        {t("ui.git.form.bundleAssets")}
+                                    </Label>
+                                    <p className="text-[10px] text-muted-foreground leading-snug">
+                                        {t("ui.git.form.bundleAssetsDesc")}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* 配置同步设置 */}
