@@ -35,11 +35,29 @@ const PageLoading = () => (
   </div>
 );
 
+function isTransientFetchError(error: unknown): boolean {
+  if (error instanceof TypeError) return true
+  const message = error instanceof Error ? error.message : String(error)
+  return /failed to fetch|networkerror|load failed|network request failed|fetch failed/i.test(message)
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 function App() {
   const { t } = useTranslation()
   const { isLoggedIn, login, logout } = useAuth()
   const { handleVaultList } = useVaultHandle()
   const { handleUserInfo, handleLogout: apiLogout } = useUserHandle()
+  const isMountedRef = useRef(true)
+
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
 
   const currentModule = useAppStore(state => state.currentModule)
   const setModule = useAppStore(state => state.setModule)
@@ -73,38 +91,66 @@ function App() {
     }
   }, [isLoggedIn, handleUserInfo, logout])
 
-  const fetchAdminInfo = useCallback(async () => {
+  const fetchAdminInfo = useCallback(async (options?: { retries?: number; retryDelayMs?: number }) => {
     if (!isLoggedIn) {
       setAdminUid(null)
       setIsAdminByCheck(null)
       return
     }
 
+    const retries = options?.retries ?? 0
+    const retryDelayMs = options?.retryDelayMs ?? 800
     const apiUrl = env.API_URL.endsWith("/") ? env.API_URL.slice(0, -1) : env.API_URL
     const token = localStorage.getItem("token") || ""
-    try {
-      const response = await fetch(addCacheBuster(`${apiUrl}/api/admin/check`), {
-        headers: buildApiHeaders({ token, includeDomain: false, includeContentType: false }),
-      })
-      if (response.ok) {
+
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const response = await fetch(addCacheBuster(`${apiUrl}/api/admin/check`), {
+          headers: buildApiHeaders({ token, includeDomain: false, includeContentType: false }),
+        })
+        if (!response.ok) {
+          if (response.status >= 500 && attempt < retries) {
+            await sleep(retryDelayMs)
+            if (!isMountedRef.current) return
+            continue
+          }
+          return
+        }
         const res = await response.json()
+        if (!isMountedRef.current) return
         if (res.code > 0 && res.data) {
           setIsAdminByCheck(res.data.isAdmin)
           if (res.data.isAdmin) {
             const configRes = await fetch(addCacheBuster(`${apiUrl}/api/admin/config`), {
               headers: buildApiHeaders({ token, includeDomain: false, includeContentType: false }),
             })
-            if (configRes.ok) {
-              const configData = await configRes.json()
-              if (configData.code > 0 && configData.data) {
-                setAdminUid(configData.data.adminUid)
+            if (!configRes.ok) {
+              if (configRes.status >= 500 && attempt < retries) {
+                await sleep(retryDelayMs)
+                if (!isMountedRef.current) return
+                continue
               }
+              return
+            }
+            const configData = await configRes.json()
+            if (!isMountedRef.current) return
+            if (configData.code > 0 && configData.data) {
+              setAdminUid(configData.data.adminUid)
             }
           }
         }
+        return
+      } catch (e) {
+        if (attempt < retries && isTransientFetchError(e)) {
+          await sleep(retryDelayMs)
+          if (!isMountedRef.current) return
+          continue
+        }
+        if (retries === 0) {
+          console.error("Fetch admin info failed", e)
+        }
+        return
       }
-    } catch (e) {
-      console.error("Fetch admin info failed", e)
     }
   }, [isLoggedIn])
 
@@ -186,38 +232,73 @@ function App() {
     handleFontsUpdate(fontUrl)
   }, [])
 
-  const fetchConfig = useCallback(async (isMounted = true) => {
+  const fetchConfig = useCallback(async (
+    isMounted = true,
+    options?: { retries?: number; retryDelayMs?: number; suppressTransientError?: boolean }
+  ) => {
+    const retries = options?.retries ?? 0
+    const retryDelayMs = options?.retryDelayMs ?? 800
+    const suppressTransientError = options?.suppressTransientError ?? false
+    const apiUrl = env.API_URL.endsWith("/") ? env.API_URL.slice(0, -1) : env.API_URL
+
     try {
-      const apiUrl = env.API_URL.endsWith("/") ? env.API_URL.slice(0, -1) : env.API_URL
-      const response = await fetch(addCacheBuster(`${apiUrl}/api/webgui/config`), {
-        headers: buildApiHeaders({
-          token: null,
-          includeContentType: false,
-          includeDomain: false,
-        }),
-      })
-      if (response.ok && isMounted) {
-        const res = await response.json()
-        if (res.code > 0 && res.data) {
-          onFontsUpdate(res.data.fontSet || res.data.FontSet || "")
-          if (res.data.registerIsEnable !== undefined) {
-            setRegisterIsEnable(res.data.registerIsEnable)
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          const response = await fetch(addCacheBuster(`${apiUrl}/api/webgui/config`), {
+            headers: buildApiHeaders({
+              token: null,
+              includeContentType: false,
+              includeDomain: false,
+            }),
+          })
+          if (!response.ok) {
+            if (response.status >= 500 && attempt < retries) {
+              await sleep(retryDelayMs)
+              if (!isMounted || !isMountedRef.current) return
+              continue
+            }
+            return
           }
-          if (res.data.ftsBleveEnabled !== undefined) {
-            setFtsBleveEnabled(res.data.ftsBleveEnabled)
+          if (isMounted && isMountedRef.current) {
+            const res = await response.json()
+            if (res.code > 0 && res.data) {
+              onFontsUpdate(res.data.fontSet || res.data.FontSet || "")
+              if (res.data.registerIsEnable !== undefined) {
+                setRegisterIsEnable(res.data.registerIsEnable)
+              }
+              if (res.data.ftsBleveEnabled !== undefined) {
+                setFtsBleveEnabled(res.data.ftsBleveEnabled)
+              }
+            }
           }
+          return
+        } catch (error: unknown) {
+          const transient = isTransientFetchError(error)
+          if (transient && attempt < retries) {
+            await sleep(retryDelayMs)
+            if (!isMounted || !isMountedRef.current) return
+            continue
+          }
+          if (isMounted && isMountedRef.current && !(suppressTransientError && transient)) {
+            toast.error(error instanceof Error ? error.message : String(error))
+          }
+          return
         }
       }
-    } catch (error: unknown) {
-      if (isMounted) {
-        toast.error(error instanceof Error ? error.message : String(error))
-      }
     } finally {
-      if (isMounted) {
+      if (isMounted && isMountedRef.current) {
         setConfigLoaded(true)
       }
     }
   }, [onFontsUpdate])
+
+  const handleAdminSetupDone = useCallback((nextAdminUid?: number) => {
+    if (typeof nextAdminUid === "number" && nextAdminUid > 0) {
+      setAdminUid(nextAdminUid)
+    }
+    void fetchAdminInfo({ retries: 2, retryDelayMs: 800 })
+    void fetchConfig(true, { retries: 2, retryDelayMs: 800, suppressTransientError: true })
+  }, [fetchAdminInfo, fetchConfig])
 
   useEffect(() => {
     let isMounted = true
@@ -379,10 +460,7 @@ function App() {
         </Suspense>
         {isLoggedIn && adminUid === 0 && isAdmin && (
           <Suspense>
-            <AdminSetupDialog onDone={() => {
-              void fetchAdminInfo()
-              fetchConfig()
-            }} />
+            <AdminSetupDialog onDone={handleAdminSetupDone} />
           </Suspense>
         )}
       </AppLayout>

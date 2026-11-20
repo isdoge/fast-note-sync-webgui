@@ -1,10 +1,11 @@
-import { GitBranch, GitPullRequestArrow, History, ChevronLeft, ChevronRight, Loader2, Plus, RefreshCw, ShieldCheck, Pencil, Trash2, Play, Eraser, CheckCircle2, AlertCircle, Clock } from "lucide-react";
+import { GitBranch, GitPullRequestArrow, History, ChevronLeft, ChevronRight, Loader2, Plus, RefreshCw, ShieldCheck, Pencil, Trash2, Play, Eraser, CheckCircle2, AlertCircle, Clock, Info } from "lucide-react";
 import { useConfirmDialog } from "@/components/context/confirm-dialog-context";
 import { GitHistoryDialog } from "@/components/layout/git-history-dialog";
 import { useVaultHandle } from "@/components/api-handle/vault-handle";
 import { GitSyncConfigDTO, GitSyncHistoryDTO } from "@/lib/types/git";
 import { GitConfigForm } from "@/components/layout/git-config-form";
 import { useGitHandle } from "@/components/api-handle/git-handle";
+import { formatGitSyncMessage } from "@/lib/utils/git-sync-message";
 import { useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -168,6 +169,11 @@ export function GitAutomation() {
                         </div>
                     </div>
 
+                    <div className="mb-4 rounded-lg border border-primary/20 bg-primary/5 px-3.5 py-2.5 text-xs text-muted-foreground flex items-start gap-2 leading-relaxed">
+                        <Info className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                        <span>{t("ui.git.multiConfigTip")}</span>
+                    </div>
+
                     {isAdding && (
                         <div className="p-4 border border-primary/20 rounded-xl bg-primary/5 mb-6 animate-in fade-in slide-in-from-top-4 duration-300">
                             <div className="flex items-center mb-4">
@@ -323,6 +329,7 @@ export function GitAutomation() {
                                         const isError = config.lastStatus === 3;
                                         const isWarning = !isError && /warn|warning|skip|跳过|警告/i.test(config.lastMessage);
                                         const isDeployReceipt = !isError && /preview deployed:|unified preview deployed:/i.test(config.lastMessage);
+                                        const formattedMessage = formatGitSyncMessage(config.lastMessage, t);
                                         return (
                                             <p
                                                 className={cn(
@@ -336,7 +343,7 @@ export function GitAutomation() {
                                                                 : "bg-muted/50 text-muted-foreground border-border/60"
                                                 )}
                                             >
-                                                {config.lastMessage}
+                                                {formattedMessage}
                                             </p>
                                         );
                                     })()}
@@ -416,11 +423,14 @@ export function GitAutomation() {
                                                             {t(`ui.git.status.${item.status}`)}
                                                         </span>
                                                     </div>
-                                                    {item.message && (
-                                                        <p className="text-xs text-muted-foreground truncate max-w-65" title={item.message}>
-                                                            {item.message}
-                                                        </p>
-                                                    )}
+                                                    {item.message && (() => {
+                                                        const formattedMessage = formatGitSyncMessage(item.message, t);
+                                                        return (
+                                                            <p className="text-xs text-muted-foreground truncate max-w-65" title={formattedMessage}>
+                                                                {formattedMessage}
+                                                            </p>
+                                                        );
+                                                    })()}
                                                 </div>
                                             </div>
                                             <div className="flex flex-col items-end shrink-0 ml-2 gap-0.5">

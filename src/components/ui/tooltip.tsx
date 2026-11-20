@@ -84,17 +84,30 @@ export function Tooltip({
           break
       }
 
-      // 计算对齐方式
+      // 计算对齐方式与视口水平边界防裁切
       if (currentSide === "top" || currentSide === "bottom") {
+        const tooltipWidth = tooltipRef.current?.offsetWidth || 0
+        const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 0
+        const padding = 12
         switch (align) {
           case "start":
             left = rect.left
+            if (tooltipWidth > 0 && viewportWidth > 0) {
+              left = Math.max(padding, Math.min(left, viewportWidth - tooltipWidth - padding))
+            }
             break
           case "center":
             left = rect.left + rect.width / 2
+            if (tooltipWidth > 0 && viewportWidth > 0) {
+              const half = tooltipWidth / 2
+              left = Math.max(padding + half, Math.min(left, viewportWidth - padding - half))
+            }
             break
           case "end":
             left = rect.right
+            if (tooltipWidth > 0 && viewportWidth > 0) {
+              left = Math.max(padding + tooltipWidth, Math.min(left, viewportWidth - padding))
+            }
             break
         }
       } else {
@@ -118,6 +131,10 @@ export function Tooltip({
   const handleMouseEnter = () => {
     if (disabled) return
 
+    if (timerRef.current) {
+      window.clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
     timerRef.current = window.setTimeout(() => {
       setIsVisible(true)
     }, delay)
@@ -148,11 +165,12 @@ export function Tooltip({
 
   // 计算 transform 原点
   const getTransformOrigin = () => {
+    const xOrigin = align === "start" ? "left" : align === "end" ? "right" : "center"
     switch (effectiveSide) {
       case "top":
-        return "bottom center"
+        return `bottom ${xOrigin}`
       case "bottom":
-        return "top center"
+        return `top ${xOrigin}`
       case "left":
         return "right center"
       case "right":
@@ -162,11 +180,12 @@ export function Tooltip({
 
   // 计算 transform 位移
   const getTransform = () => {
+    const xOffset = align === "start" ? "0%" : align === "end" ? "-100%" : "-50%"
     switch (effectiveSide) {
       case "top":
-        return "translate(-50%, -100%)"
+        return `translate(${xOffset}, -100%)`
       case "bottom":
-        return "translate(-50%, 0%)"
+        return `translate(${xOffset}, 0%)`
       case "left":
         return "translate(-100%, -50%)"
       case "right":
@@ -204,6 +223,8 @@ export function Tooltip({
       ref={triggerRef}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      onFocus={handleMouseEnter}
+      onBlur={handleMouseLeave}
       onKeyDown={handleKeyDown}
       role="button"
       tabIndex={0}

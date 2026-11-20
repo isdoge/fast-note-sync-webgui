@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight, Loader2, GitCommitHorizontal, CheckCircle2, 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useGitHandle } from "@/components/api-handle/git-handle";
+import { formatGitSyncMessage } from "@/lib/utils/git-sync-message";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { GitSyncHistoryDTO } from "@/lib/types/git";
 import { Button } from "@/components/ui/button";
@@ -137,9 +138,14 @@ export function GitHistoryDialog({ configId, open, onOpenChange }: GitHistoryDia
                                                 {t(`ui.git.status.${item.status}`)}
                                             </span>
                                         </TableCell>
-                                        <TableCell className="max-w-65 truncate opacity-80" title={item.message}>
-                                            {item.message || "-"}
-                                        </TableCell>
+                                        {(() => {
+                                            const formattedMessage = item.message ? formatGitSyncMessage(item.message, t) : "";
+                                            return (
+                                                <TableCell className="max-w-65 truncate opacity-80" title={formattedMessage || undefined}>
+                                                    {formattedMessage || "-"}
+                                                </TableCell>
+                                            );
+                                        })()}
                                     </TableRow>
                                 ))
                             ) : (

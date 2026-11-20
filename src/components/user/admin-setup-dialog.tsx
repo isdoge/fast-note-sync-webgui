@@ -8,18 +8,51 @@ import { buildApiHeaders } from "@/lib/utils/api-headers";
 import env from "@/env.ts";
 
 interface AdminSetupDialogProps {
-  onDone: () => void;
+  onDone: (adminUid?: number) => void;
+  retryDelayMs?: number;
 }
 
-export function AdminSetupDialog({ onDone }: AdminSetupDialogProps) {
+const DEFAULT_RETRY_DELAY_MS = 800;
+const MAX_VERIFY_RETRIES = 2;
+
+function isTransientFetchError(error: unknown): boolean {
+  if (error instanceof TypeError) return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return /failed to fetch|networkerror|load failed|network request failed|fetch failed/i.test(message);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function AdminSetupDialog({ onDone, retryDelayMs = DEFAULT_RETRY_DELAY_MS }: AdminSetupDialogProps) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
+
+  const verifyAdminUidAfterReload = async (apiUrl: string, token: string, expectedUid: number): Promise<boolean> => {
+    for (let attempt = 0; attempt < MAX_VERIFY_RETRIES; attempt++) {
+      await sleep(retryDelayMs);
+      try {
+        const res = await fetch(addCacheBuster(`${apiUrl}/api/admin/config`), {
+          headers: buildApiHeaders({ token, includeDomain: false, includeContentType: false }),
+        });
+        if (!res.ok) continue;
+        const data = await res.json();
+        if (data.code > 0 && data.data?.adminUid === expectedUid) {
+          return true;
+        }
+      } catch {
+        // 服务端仍在热重载，继续等待下一次重试
+      }
+    }
+    return false;
+  };
 
   const handleSetAdmin = async () => {
     setLoading(true);
     const token = localStorage.getItem("token") || "";
     const currentUidStr = localStorage.getItem("uid");
-    
+
     if (!currentUidStr) {
       toast.error(t("ui.auth.sessionExpired"));
       setLoading(false);
@@ -27,26 +60,40 @@ export function AdminSetupDialog({ onDone }: AdminSetupDialogProps) {
     }
 
     const currentUid = parseInt(currentUidStr);
+    const apiUrl = env.API_URL.endsWith("/") ? env.API_URL.slice(0, -1) : env.API_URL;
 
     try {
-      const apiUrl = env.API_URL.endsWith("/") ? env.API_URL.slice(0, -1) : env.API_URL
-      
       // Directly POST the update
       const saveRes = await fetch(addCacheBuster(`${apiUrl}/api/admin/config`), {
         method: "POST",
         headers: buildApiHeaders({ token }),
         body: JSON.stringify({ adminUid: currentUid }),
       });
-      
+
+      if (!saveRes.ok && saveRes.status >= 500) {
+        if (await verifyAdminUidAfterReload(apiUrl, token, currentUid)) {
+          toast.success(t("ui.settings.settingAdminSuccess"));
+          onDone(currentUid);
+          return;
+        }
+        toast.error(t("ui.settings.saveFailed"));
+        return;
+      }
+
       const saveResult = await saveRes.json();
-      
+
       if (saveResult.code > 0) {
         toast.success(t("ui.settings.settingAdminSuccess"));
-        onDone();
+        onDone(currentUid);
       } else {
         toast.error(saveResult.message || t("ui.settings.saveFailed"));
       }
     } catch (error) {
+      if (isTransientFetchError(error) && await verifyAdminUidAfterReload(apiUrl, token, currentUid)) {
+        toast.success(t("ui.settings.settingAdminSuccess"));
+        onDone(currentUid);
+        return;
+      }
       console.error("Admin setup failed:", error);
       toast.error(t("ui.settings.saveFailed"));
     } finally {

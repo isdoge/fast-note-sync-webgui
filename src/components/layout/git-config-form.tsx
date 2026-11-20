@@ -3,10 +3,11 @@ import type { GitSyncConfigRequest, GitSyncConfigDTO } from "@/lib/types/git";
 import { createGitSyncSchema } from "@/lib/validations/git-sync-schema";
 import { useGitHandle } from "@/components/api-handle/git-handle";
 import { useAppStore } from "@/stores/app-store";
-import { Eye, EyeOff, ShieldCheck, Plus, Trash2, ChevronDown, ChevronUp, Sparkles } from "lucide-react";
+import { Eye, EyeOff, ShieldCheck, Plus, Trash2, ChevronDown, ChevronUp, Sparkles, CircleAlert } from "lucide-react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Tooltip } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "react-i18next";
 import { VaultType } from "@/lib/types/vault";
@@ -28,6 +29,20 @@ interface GitConfigFormProps {
 
 const DEFAULT_CONFIG_SYNC_RULES = [".obsidian/appearance.json", ".obsidian/community-plugins.json"];
 
+function FieldTooltip({ content }: { content: string }) {
+    return (
+        <Tooltip
+            content={content}
+            side="top"
+            align="start"
+            delay={150}
+            className="max-w-xs whitespace-normal leading-relaxed px-3 py-2 text-left font-normal shadow-lg"
+        >
+            <CircleAlert className="h-3.5 w-3.5 text-muted-foreground/75 hover:text-primary cursor-help transition-colors shrink-0" />
+        </Tooltip>
+    )
+}
+
 /**
  * Git 仓库配置表单组件
  */
@@ -47,7 +62,6 @@ export function GitConfigForm({ config, vaults, onSubmit, onCancel }: GitConfigF
         config?.webhookUrl
     )
     const [isBlogSectionOpen, setIsBlogSectionOpen] = useState(hasBlogConfig)
-    const [isFireflyPresetApplied, setIsFireflyPresetApplied] = useState(false)
 
     const schema = useMemo(() => createGitSyncSchema(t), [t])
 
@@ -112,26 +126,28 @@ export function GitConfigForm({ config, vaults, onSubmit, onCancel }: GitConfigF
     const includeConfig = watch("includeConfig")
     const validateFrontmatter = watch("validateFrontmatter")
     const bundleAssets = watch("bundleAssets")
-    const targetSubdir = watch("targetSubdir")
 
     useEffect(() => {
         reset(defaultValues)
         setShowPassword(false)
         setIsBlogSectionOpen(hasBlogConfig)
-        setIsFireflyPresetApplied(false)
     }, [defaultValues, reset, hasBlogConfig])
 
     const handleApplyFireflyPreset = useCallback(() => {
-        setValue("branch", "master", { shouldDirty: true, shouldValidate: true })
-        setValue("targetSubdir", "src/content/posts/经验分享", { shouldDirty: true, shouldValidate: true })
+        if (!getValues("branch")?.trim()) {
+            setValue("branch", "main", { shouldDirty: true, shouldValidate: true })
+        }
+        if (!getValues("sourceDir")?.trim()) {
+            setValue("sourceDir", "Blog", { shouldDirty: true, shouldValidate: true })
+        }
+        setValue("targetSubdir", "src/content/posts", { shouldDirty: true, shouldValidate: true })
         setValue("requireFrontmatter", "type=share", { shouldDirty: true, shouldValidate: true })
         setValue("validateFrontmatter", true, { shouldDirty: true, shouldValidate: true })
         setValue("bundleAssets", true, { shouldDirty: true, shouldValidate: true })
         setValue("delay", 60, { shouldDirty: true, shouldValidate: true })
         setValue("includeConfig", false, { shouldDirty: true, shouldValidate: true })
         setIsBlogSectionOpen(true)
-        setIsFireflyPresetApplied(true)
-    }, [setValue])
+    }, [getValues, setValue])
 
     const handleCancel = useCallback(() => {
         reset(defaultValues)
@@ -193,7 +209,7 @@ export function GitConfigForm({ config, vaults, onSubmit, onCancel }: GitConfigF
                     <Label htmlFor="repoUrl" className="text-xs font-semibold text-muted-foreground ml-1">{t("ui.git.repoUrl")}</Label>
                     <Input
                         id="repoUrl"
-                        placeholder={isFireflyPresetApplied || Boolean(targetSubdir) ? "http://127.0.0.1:4323/blog.git" : "https://github.com/user/repo.git"}
+                        placeholder="https://github.com/username/blog-repo.git"
                         autoComplete="off"
                         className="bg-background border-input"
                         {...register("repoUrl")}
@@ -290,9 +306,12 @@ export function GitConfigForm({ config, vaults, onSubmit, onCancel }: GitConfigF
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
                             {/* 源目录前缀 */}
                             <div className="space-y-1.5">
-                                <Label htmlFor="sourceDir" className="text-xs font-semibold text-muted-foreground ml-1">
-                                    {t("ui.git.form.sourceDir")}
-                                </Label>
+                                <div className="flex items-center gap-1.5 ml-1">
+                                    <Label htmlFor="sourceDir" className="text-xs font-semibold text-muted-foreground">
+                                        {t("ui.git.form.sourceDir")}
+                                    </Label>
+                                    <FieldTooltip content={t("ui.git.form.sourceDirTooltip")} />
+                                </div>
                                 <Input
                                     id="sourceDir"
                                     autoComplete="off"
@@ -306,9 +325,12 @@ export function GitConfigForm({ config, vaults, onSubmit, onCancel }: GitConfigF
 
                             {/* 目标仓库子目录沙箱 */}
                             <div className="space-y-1.5">
-                                <Label htmlFor="targetSubdir" className="text-xs font-semibold text-muted-foreground ml-1">
-                                    {t("ui.git.form.targetSubdir")}
-                                </Label>
+                                <div className="flex items-center gap-1.5 ml-1">
+                                    <Label htmlFor="targetSubdir" className="text-xs font-semibold text-muted-foreground">
+                                        {t("ui.git.form.targetSubdir")}
+                                    </Label>
+                                    <FieldTooltip content={t("ui.git.form.targetSubdirTooltip")} />
+                                </div>
                                 <Input
                                     id="targetSubdir"
                                     autoComplete="off"
@@ -322,9 +344,12 @@ export function GitConfigForm({ config, vaults, onSubmit, onCancel }: GitConfigF
 
                             {/* Frontmatter 过滤条件 */}
                             <div className="space-y-1.5">
-                                <Label htmlFor="requireFrontmatter" className="text-xs font-semibold text-muted-foreground ml-1">
-                                    {t("ui.git.form.requireFrontmatter")}
-                                </Label>
+                                <div className="flex items-center gap-1.5 ml-1">
+                                    <Label htmlFor="requireFrontmatter" className="text-xs font-semibold text-muted-foreground">
+                                        {t("ui.git.form.requireFrontmatter")}
+                                    </Label>
+                                    <FieldTooltip content={t("ui.git.form.requireFrontmatterTooltip")} />
+                                </div>
                                 <Input
                                     id="requireFrontmatter"
                                     autoComplete="off"
@@ -338,9 +363,12 @@ export function GitConfigForm({ config, vaults, onSubmit, onCancel }: GitConfigF
 
                             {/* 构建重试 Webhook 地址 */}
                             <div className="space-y-1.5">
-                                <Label htmlFor="webhookUrl" className="text-xs font-semibold text-muted-foreground ml-1">
-                                    {t("ui.git.form.webhookUrl")}
-                                </Label>
+                                <div className="flex items-center gap-1.5 ml-1">
+                                    <Label htmlFor="webhookUrl" className="text-xs font-semibold text-muted-foreground">
+                                        {t("ui.git.form.webhookUrl")}
+                                    </Label>
+                                    <FieldTooltip content={t("ui.git.form.webhookUrlTooltip")} />
+                                </div>
                                 <Input
                                     id="webhookUrl"
                                     autoComplete="off"
@@ -348,7 +376,7 @@ export function GitConfigForm({ config, vaults, onSubmit, onCancel }: GitConfigF
                                     className="bg-background border-input"
                                     {...register("webhookUrl")}
                                 />
-                                <p className="text-[10px] text-muted-foreground ml-1">{t("ui.git.form.webhookUrlDesc")}</p>
+                                <p className="text-[10px] text-muted-foreground ml-1 leading-relaxed">{t("ui.git.form.webhookUrlDesc")}</p>
                                 {errors.webhookUrl && <p className="text-[11px] text-destructive mt-1 ml-1">{errors.webhookUrl.message}</p>}
                             </div>
                         </div>
@@ -363,9 +391,12 @@ export function GitConfigForm({ config, vaults, onSubmit, onCancel }: GitConfigF
                                     className="mt-0.5 border-input data-[state=checked]:bg-primary data-[state=checked]:border-primary"
                                 />
                                 <div className="space-y-0.5">
-                                    <Label htmlFor="validateFrontmatter" className="text-xs font-semibold cursor-pointer">
-                                        {t("ui.git.form.validateFrontmatter")}
-                                    </Label>
+                                    <div className="flex items-center gap-1.5">
+                                        <Label htmlFor="validateFrontmatter" className="text-xs font-semibold cursor-pointer">
+                                            {t("ui.git.form.validateFrontmatter")}
+                                        </Label>
+                                        <FieldTooltip content={t("ui.git.form.validateFrontmatterTooltip")} />
+                                    </div>
                                     <p className="text-[10px] text-muted-foreground leading-snug">
                                         {t("ui.git.form.validateFrontmatterDesc")}
                                     </p>
@@ -381,9 +412,12 @@ export function GitConfigForm({ config, vaults, onSubmit, onCancel }: GitConfigF
                                     className="mt-0.5 border-input data-[state=checked]:bg-primary data-[state=checked]:border-primary"
                                 />
                                 <div className="space-y-0.5">
-                                    <Label htmlFor="bundleAssets" className="text-xs font-semibold cursor-pointer">
-                                        {t("ui.git.form.bundleAssets")}
-                                    </Label>
+                                    <div className="flex items-center gap-1.5">
+                                        <Label htmlFor="bundleAssets" className="text-xs font-semibold cursor-pointer">
+                                            {t("ui.git.form.bundleAssets")}
+                                        </Label>
+                                        <FieldTooltip content={t("ui.git.form.bundleAssetsTooltip")} />
+                                    </div>
                                     <p className="text-[10px] text-muted-foreground leading-snug">
                                         {t("ui.git.form.bundleAssetsDesc")}
                                     </p>

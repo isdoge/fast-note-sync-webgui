@@ -461,35 +461,48 @@ export function VaultList({ onNavigateToNotes, onNavigateToAttachments, ftsBleve
     if (showNotification) {
       setIsRefreshing(true)
     }
+    const maxRetries = showNotification ? 0 : 2
     try {
-      await handleVaultList((data) => {
-        // 从本地存储读取排序顺序
-        const savedOrder = localStorage.getItem(VAULT_ORDER_KEY)
-        if (savedOrder) {
-          try {
-            const orderIds = JSON.parse(savedOrder) as string[]
-            // 按保存的顺序排序
-            const sortedData = [...data].sort((a, b) => {
-              const indexA = orderIds.indexOf(a.id)
-              const indexB = orderIds.indexOf(b.id)
-              // 如果不在保存的顺序中，放到最后
-              if (indexA === -1) return 1
-              if (indexB === -1) return -1
-              return indexA - indexB
-            })
-            setVaults(sortedData)
-          } catch {
-            setVaults(data)
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          await handleVaultList((data) => {
+            // 从本地存储读取排序顺序
+            const savedOrder = localStorage.getItem(VAULT_ORDER_KEY)
+            if (savedOrder) {
+              try {
+                const orderIds = JSON.parse(savedOrder) as string[]
+                // 按保存的顺序排序
+                const sortedData = [...data].sort((a, b) => {
+                  const indexA = orderIds.indexOf(a.id)
+                  const indexB = orderIds.indexOf(b.id)
+                  // 如果不在保存的顺序中，放到最后
+                  if (indexA === -1) return 1
+                  if (indexB === -1) return -1
+                  return indexA - indexB
+                })
+                setVaults(sortedData)
+              } catch {
+                setVaults(data)
+              }
+            } else {
+              setVaults(data)
+            }
+          })
+          if (showNotification) {
+            toast.success(t("ui.common.refreshSuccess"))
           }
-        } else {
-          setVaults(data)
+          return
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : String(error)
+          const isTransient = error instanceof TypeError || /failed to fetch|networkerror|load failed|network request failed|fetch failed/i.test(message)
+          if (isTransient && attempt < maxRetries) {
+            await new Promise((resolve) => setTimeout(resolve, 800))
+            continue
+          }
+          toast.error(message)
+          return
         }
-      })
-      if (showNotification) {
-        toast.success(t("ui.common.refreshSuccess"))
       }
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : String(error))
     } finally {
       if (showNotification) {
         setIsRefreshing(false)
